@@ -23,40 +23,36 @@
     <h1>🤖 具身大模型简报 - 2602.10116 - SAGE: Scalable Agentic 3D Scene Generation for Embodied AI (SAGE：面向具身智能的可扩展智能体3D场景生成)</h1>
     <div id="content"></div>
     <script type="text/markdown" id="raw-markdown">### 1. 🔥 [SAGE: Scalable Agentic 3D Scene Generation for Embodied AI](https://arxiv.org/abs/2602.10116) (SAGE：面向具身智能的可扩展智能体3D场景生成)
-- **研究机构**: `NVIDIA, University of Illinois Urbana-Champaign (UIUC), Stanford University, Cornell University`
+- **研究机构**: `NVIDIA, UIUC, Cornell University, Stanford University`
 - **Arxiv ID**: `2602.10116` | [点击跳转](https://arxiv.org/abs/2602.10116)
 
 **0. 论文标题**
 - **英文标题**: SAGE: Scalable Agentic 3D Scene Generation for Embodied AI
 - **中文标题**: SAGE：面向具身智能的可扩展智能体3D场景生成
-- **研究机构**: NVIDIA, University of Illinois Urbana-Champaign (UIUC), Stanford University, Cornell University
+- **研究机构**: NVIDIA, UIUC, Cornell University, Stanford University
 
 **1. 整体逻辑**
-- **研究任务**: 为具身智能自动生成大规模、物理有效且可直接导入仿真器（Simulation-ready）的3D室内场景，并自动生成动作数据用于机器人策略训练。
-- **研究动机**: 真实世界收集具身数据成本太高。现有的3D场景生成方法（如基于规则或大模型流水线）生成的场景往往存在物体悬空、穿模等物理无效问题，且缺乏质量、摩擦力等物理属性，无法直接扔进Isaac Sim等仿真器里训练机器人；此外，现有生成过程是单向的，缺乏自我纠错能力。
-- **本质改动**: 将场景生成重构为Agent驱动的闭环迭代过程。Agent动态调用生成工具，并通过“视觉评论家”和“物理评论家（直接跑仿真）”的反馈不断修改场景，直到物理完全稳定。随后对场景做多级数据增强，并自动生成机器人动作轨迹来训练策略。
-- **技术溯源**: 基于 LLM/VLM 作为 Agent 大脑，使用 TRELLIS 做文本到3D资产生成，Isaac Sim 做物理仿真验证，Diffusion Policy 做策略学习。
+- **研究任务**: 根据文本或图像提示，自动生成能直接导入物理仿真器（如Isaac Sim）的3D室内场景，并基于这些场景自动生成动作数据来训练机器人策略。
+- **研究动机**: 现有的3D场景生成方法（无论是基于规则还是大模型流水线）生成的场景往往缺乏物理属性，放进仿真器里容易穿模或倒塌，无法直接用于具身智能训练。且传统方法是静态流水线，缺乏自我纠错能力。
+- **本质改动**: 把场景生成从“一次性静态流水线”改成了“Agent驱动的闭环迭代系统”。引入视觉和物理双重评论家（Critic），特别是把物理仿真器直接接入生成循环，通过反复试错和修改，确保生成的场景在物理上绝对稳定。
+- **技术溯源**: 大脑和视觉评估基于 LLM/VLM（如 Qwen3-VL），3D资产生成基于 TRELLIS，物理验证基于 Isaac Sim，运动规划基于 Curobo 和 M2T2，下游策略学习基于 Diffusion Policy。系统通信基于 Model Context Protocol (MCP)。
 
 **2. 技术拆解**
-- **重点改进**: 
-  1. 引入 Visual Critic 和 Physics Critic 构成闭环反馈，解决生成场景物理无效的问题。
-  2. 基于 MCP（Model Context Protocol）协议动态调度生成和修改工具，打破固定流水线。
-  3. 提出物体配置、物体类别、场景布局三个层级的场景增强方法，扩充训练数据多样性。
+- **重点改进**: 引入了 Visual Critic 和 Physics Critic 做闭环反馈。Physics Critic 是核心，它直接把当前场景丢进 Isaac Sim 跑物理仿真，检测重力下的稳定性和碰撞。如果物体倒了或穿模了，就把错误反馈给 Agent，Agent 会调用工具调整物体位置、更换尺寸或移除物体，直到物理验证通过。
 - **架构细节**: 
-  - **输入输出**: 输入文本任务描述（如“把碗放到桌上”），输出包含物理属性的3D场景文件和机器人动作轨迹。
-  - **Generator（生成器）**: 包含场景初始化、资产放置（用 TRELLIS 生成3D模型，VLM 估算质量/材质等物理属性，DFS搜索无碰撞位置）、资产移动和移除工具。
-  - **Critic（评论家）**: Visual Critic 通过多视角渲染图检查语义和空间合理性；Physics Critic 将场景导入 Isaac Sim 跑物理仿真，检测重力下的位移和碰撞。
-  - **动作与策略**: 用 M2T2 和 Curobo 生成抓取和机械臂轨迹，RRT 生成导航轨迹。策略模型采用 Diffusion Policy，输入多视角 RGB-D 图像，输出连续动作。
-- **核心 Loss**: 
-  - **场景生成阶段**: 无传统神经网络 Loss，依赖仿真器物理状态（碰撞、位移）和 VLM 视觉反馈作为迭代终止条件。
-  - **策略学习阶段**: 使用 Diffusion Policy 标准的去噪均方误差（MSE）Loss 进行模仿学习（行为克隆）。
+  - **输入输出**: 输入为文本提示（如“把碗放桌上”）或参考图像，输出为带有物理属性的仿真就绪3D场景及机器人动作轨迹。
+  - **模型结构**: Agent 通过 MCP 协议调用4个生成器（房间初始化、物体放置、移动、移除）。物体放置时，用 VLM 估算质量、摩擦力等物理属性，用 DFS 搜索无碰撞位置。
+  - **数据增强与动作生成**: 场景生成后，在物体位姿、物体类别、整体布局三个层级做数据增强。动作数据用 M2T2 算抓取姿态，Curobo 算机械臂无碰撞轨迹，RRT 算底盘导航。
+- **核心 Loss**: 场景生成部分没有传统的神经网络 Loss，依靠的是物理引擎的硬约束（碰撞/稳定检测）和 VLM 的打分反馈。下游的机器人策略学习使用的是 Diffusion Policy，计算标准的动作去噪 Loss（行为克隆）。
 
 **3. 实验结果**
-- **数据集和baseline**: 在卧室、厨房、客厅等常见场景及开放词汇场景下对比 Holodeck 和 SceneWeaver。策略训练在 Pick-and-Place（抓取放置）和 Mobile Manipulation（移动操作）任务上评估。作者开源了包含1万个场景的 SAGE-10k 数据集。
-- **评价指标**: 场景质量通过 LLM/VLM 打分（真实感、功能性、布局等），并统计碰撞率（越低越好）和物理稳定率（越高越好）。策略评估看任务成功率。
+- **数据集和baseline**: 对比了 Holodeck 和 SceneWeaver。作者自己构建并开源了 SAGE-10k 数据集（包含1万个场景，50种房间类型，56.5万个独立3D物体）。
+- **评价指标**: 
+  - **场景生成**: 物体数量、真实感、布局合理性（由大模型打分），以及最核心的碰撞率（越低越好）和物理稳定率（越高越好）。
+  - **具身策略**: Pick-and-Place（抓取放置）和 Mobile Manipulation（移动抓取）任务的成功率。
 - **实验结果**: 
-  - **场景生成**: SAGE 生成的物体数量更多（平均48.2个，baseline约24-30个），碰撞率降至 1.9%（baseline为22%-32%），物理稳定率达到 99.9%（baseline约63%-67%），基本解决了物体悬空和穿模问题。
-  - **策略学习**: 使用 SAGE 生成的数据训练 Diffusion Policy，成功率随场景和演示数据量增加呈现明显的 Scaling 趋势。在未见物体和布局上的泛化成功率显著高于 baseline，证明了高质量仿真数据对具身智能 Scaling 的有效性。
+  - **场景生成**: SAGE 的物理稳定率从前人的 63.8%（Holodeck）和 67.7%（SceneWeaver）直接提升到了 99.9%，碰撞率从 22.0%/32.8% 降到了 1.9%。同时场景内的平均物体数量更多（48.2 vs 30.3/24.4），布局更合理。
+  - **具身策略**: 用 SAGE 生成的数据训练 Diffusion Policy，成功率随场景和演示数据量的增加呈现明显的 Scaling 趋势。在没见过的物体和布局上，泛化成功率显著高于 baseline，缩小了与特权智能体（Privileged Agent）的差距。
 
 ---
 </script>

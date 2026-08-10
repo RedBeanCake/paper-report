@@ -53,19 +53,93 @@ def get_feishu_tenant_token():
         return None
 
 
-def send_feishu_markdown_to_chat(content_md, title=None):
-    """把 Markdown 报告作为消息发送到指定飞书群（走应用机器人 API）"""
+def _md_to_feishu_card(content_md, title=None, paper_url=None):
+    """把 Qwen 生成的 Markdown 报告转成飞书卡片元素列表，渲染效果尽量好。"""
+    elements = []
+
+    # 标题行下方加一行论文链接（如果有）
+    if paper_url:
+        elements.append({"tag": "div", "text": {"tag": "lark_md", "content": f"📎 [查看原文]({paper_url})"}})
+        elements.append({"tag": "hr"})
+
+    lines = content_md.split("\n")
+    buffer = []
+
+    def flush():
+        """把当前 buffer 里的文本行合并成一个 lark_md div"""
+        if not buffer:
+            return
+        text = "\n".join(buffer)
+        if text.strip():
+            elements.append({"tag": "div", "text": {"tag": "lark_md", "content": text}})
+        buffer.clear()
+
+    for line in lines:
+        stripped = line.strip()
+
+        # 分隔线 → 卡片分隔线
+        if stripped in ("---", "***", "___"):
+            flush()
+            elements.append({"tag": "hr"})
+            continue
+
+        # 章节标题（### / #### / **X. ...**）
+        if re.match(r'^#{1,4}\s', stripped) or re.match(r'^\*\*\d+\.', stripped):
+            flush()
+            # 转为粗体，飞书 lark_md 支持
+            heading = re.sub(r'^#{1,4}\s*', '', stripped)
+            # 去掉多余的 ** 包裹
+            heading = re.sub(r'^\*\*(.+?)\*\*', r'\1', heading)
+            elements.append({"tag": "div", "text": {"tag": "lark_md", "content": f"**{heading}**"}})
+            continue
+
+        # 列表项 "- **key**: value" → "• **key**：value"
+        m = re.match(r'^[-*]\s+\*\*(.+?)\*\*[:：]\s*(.*)', stripped)
+        if m:
+            flush()
+            key, val = m.group(1), m.group(2)
+            if val:
+                elements.append({"tag": "div", "text": {"tag": "lark_md", "content": f"• **{key}**：{val}"}})
+            else:
+                # 没有值的 key（说明内容在下面的子列表里）
+                buffer.append(f"**{key}：**")
+            continue
+
+        # 普通列表项 "- xxx" → "• xxx"
+        m2 = re.match(r'^[-*]\s+(.*)', stripped)
+        if m2 and not stripped.startswith("- **"):
+            flush()
+            elements.append({"tag": "div", "text": {"tag": "lark_md", "content": f"• {m2.group(1)}"}})
+            continue
+
+        # 普通文本（含带 ** 的）
+        if stripped:
+            buffer.append(stripped)
+
+    flush()
+    return elements
+
+
+def send_feishu_markdown_to_chat(content_md, title=None, paper_url=None):
+    """把 Markdown 报告转成飞书卡片发送到指定群（走应用机器人 API）"""
     if not (TARGET_CHAT_ID and get_feishu_tenant_token()):
         return False
+
+    card_elements = _md_to_feishu_card(content_md, title=title, paper_url=paper_url)
+
     card = {
-        "header": {"title": {"tag": "plain_text", "content": title or "📄 论文深度解析"}, "template": "blue"},
-        "elements": [{"tag": "div", "text": {"tag": "lark_md", "content": content_md[:20000]}}]
+        "header": {
+            "title": {"tag": "plain_text", "content": title or "📄 论文深度解析"},
+            "template": "blue"
+        },
+        "elements": card_elements if card_elements else [{"tag": "div", "text": {"tag": "lark_md", "content": content_md[:20000]}}]
     }
+
     try:
         res = requests.post(
             f"https://open.feishu.cn/open-apis/im/v1/messages?receive_id_type=chat_id",
             headers={"Authorization": f"Bearer {get_feishu_tenant_token()}"},
-            json={"receive_id": TARGET_CHAT_ID, "msg_type": "interactive", "content": json.dumps(card)},
+            json={"receive_id": TARGET_CHAT_ID, "msg_type": "interactive", "content": json.dumps(card, ensure_ascii=False)},
             timeout=15)
         print(f"飞书应用消息发送结果: {res.status_code} {res.text[:200]}")
         return res.status_code == 200
@@ -75,13 +149,26 @@ def send_feishu_markdown_to_chat(content_md, title=None):
 
 
 def send_feishu_webhook(text):
-    """发送纯文本或简单 Markdown 到飞书（webhook 方式，兼容旧配置）"""
+    """发送纯文本到飞书（webhook 方式，兼容旧配置）"""
     if not FEISHU_WEBHOOK:
         return
     try:
         requests.post(FEISHU_WEBHOOK, json={"msg_type": "text", "content": {"text": text}}, timeout=10)
     except Exception as e:
         print(f"飞书 webhook 发送失败: {e}")
+
+
+def send_feishu_card_via_webhook(card):
+    """通过 webhook 发送卡片（应用机器人不可用时的回退方案）"""
+    if not FEISHU_WEBHOOK:
+        return False
+    try:
+        res = requests.post(FEISHU_WEBHOOK, json={"msg_type": "interactive", "card": card}, timeout=15)
+        print(f"飞书 webhook 卡片发送结果: {res.status_code} {res.text[:200]}")
+        return res.status_code == 200
+    except Exception as e:
+        print(f"飞书 webhook 卡片发送失败: {e}")
+        return False
 
 
 # --- 2. arXiv 抓取 ---
@@ -560,12 +647,17 @@ def main():
                 file_path = generate_single_page(entry)
                 print(f"已生成页面: {file_path}")
 
-                # 把报告正文推送到飞书群（应用机器人）
+                # 把报告正文推送到飞书群（应用机器人 → webhook 回退）
+                paper_url = f"https://arxiv.org/abs/{entry['paper_id']}" if entry.get("paper_id") else entry.get("source_url", "")
+                card_elements = _md_to_feishu_card(entry["report"], title=entry["title"], paper_url=paper_url)
+                card = {
+                    "header": {"title": {"tag": "plain_text", "content": f"📄 {entry['title']}"}, "template": "blue"},
+                    "elements": card_elements
+                }
                 if TARGET_CHAT_ID and get_feishu_tenant_token():
-                    send_feishu_markdown_to_chat(entry["report"], title=entry["title"])
+                    send_feishu_markdown_to_chat(entry["report"], title=entry["title"], paper_url=paper_url)
                 elif FEISHU_WEBHOOK:
-                    # 退回 webhook：文本消息
-                    send_feishu_webhook(f"📄 {entry['title']}\n{entry['report']}")
+                    send_feishu_card_via_webhook(card)
 
         rebuild_index()
         print("done. 共生成", len(entries), "篇解析")
