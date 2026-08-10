@@ -1,12 +1,10 @@
-name: Daily VLA Report
+name: Paper Report (manual only)
 
 on:
-  schedule:
-    - cron: '0 2 * * 1-5' # 周一至周五北京时间 10:00 触发
   workflow_dispatch:
     inputs:
       papers:
-        description: '输入需要深度解析的内容：arXiv ID（如 2403.xxxx）或链接（arxiv / 任意网页 URL），多个用逗号或换行分隔'
+        description: '输入需要深度解析的内容：arXiv ID（如 2602.10116）或链接（arxiv / 任意网页 URL），多个用逗号或换行分隔'
         required: false
         default: ''
       chat_id:
@@ -36,13 +34,14 @@ jobs:
         run: pip install requests beautifulsoup4 openai
 
       - name: Run Scraper
+        timeout-minutes: 15
         env:
-          PAPERS: ${{ github.event.inputs.papers }} # 手动输入的 ID / URL（支持任意网页）
-          CHAT_ID: ${{ github.event.inputs.chat_id }} # 可选：推送到指定群的 chat_id
+          PAPERS: ${{ github.event.inputs.papers }}
+          CHAT_ID: ${{ github.event.inputs.chat_id }}
           DASHSCOPE_API_KEY: ${{ secrets.DASHSCOPE_API_KEY }}
           FEISHU_WEBHOOK: ${{ secrets.FEISHU_WEBHOOK }}
-          FEISHU_APP_ID: ${{ secrets.FEISHU_APP_ID }} # 可选：应用机器人推送
-          FEISHU_APP_SECRET: ${{ secrets.FEISHU_APP_SECRET }} # 可选：应用机器人推送
+          FEISHU_APP_ID: ${{ secrets.FEISHU_APP_ID }}
+          FEISHU_APP_SECRET: ${{ secrets.FEISHU_APP_SECRET }}
           GITHUB_REPOSITORY_OWNER: ${{ github.repository_owner }}
           GITHUB_REPOSITORY: ${{ github.repository }}
         run: python main.py
@@ -52,12 +51,8 @@ jobs:
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
           git add .
-          # 只有在有变动时才提交，防止报错
           git diff --quiet && git diff --staged --quiet || git commit -m "Auto-update: $(date +'%Y-%m-%d')"
-
-          # 关键点：先拉取远程的最新改动（比如你手动删除的操作），再把机器人的改动接在后面
           git pull --rebase origin main
-
           git push origin main
 
       - name: Deploy to Pages
