@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>📚 具身大模型科研日报 - 解析存档</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/github-markdown-css/5.2.0/github-markdown.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <style>
+        .markdown-body { box-sizing: border-box; min-width: 200px; max-width: 980px; margin: 0 auto; padding: 45px; }
+        @media (max-width: 767px) { .markdown-body { padding: 15px; } }
+    </style>
+</head>
+<body class="markdown-body">
+    <h1>📚 具身大模型科研日报 - 解析存档</h1>
+    <div id="content"></div>
+    <script type="text/markdown" id="raw-markdown">### 📅 解析存档列表
+
+- [🤖 具身大模型简报 - 2602.10116 - SAGE: Scalable Agentic 3D Scene Generation for Embodied AI (SAGE：面向具身智能的可扩展智能体3D场景生成)](archive/2602.10116.html)
+</script>
+    <script>
+        const rawMdElement = document.getElementById('raw-markdown');
+        if (rawMdElement) { document.getElementById('content').innerHTML = marked.parse(rawMdElement.textContent); }
+    </script>
+</body>
+</html>
