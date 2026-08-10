@@ -1,0 +1,68 @@
+name: Daily VLA Report
+
+on:
+  schedule:
+    - cron: '0 2 * * 1-5' # 周一至周五北京时间 10:00 触发
+  workflow_dispatch:
+    inputs:
+      papers:
+        description: '输入需要深度解析的内容：arXiv ID（如 2403.xxxx）或链接（arxiv / 任意网页 URL），多个用逗号或换行分隔'
+        required: false
+        default: ''
+      chat_id:
+        description: '（可选）解析完成后要把报告推送到哪个飞书群的 chat_id，留空则用仓库默认配置'
+        required: false
+        default: ''
+
+permissions:
+  contents: write
+  pages: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.9'
+
+      - name: Install dependencies
+        run: pip install requests beautifulsoup4 openai
+
+      - name: Run Scraper
+        env:
+          PAPERS: ${{ github.event.inputs.papers }} # 手动输入的 ID / URL（支持任意网页）
+          CHAT_ID: ${{ github.event.inputs.chat_id }} # 可选：推送到指定群的 chat_id
+          DASHSCOPE_API_KEY: ${{ secrets.DASHSCOPE_API_KEY }}
+          FEISHU_WEBHOOK: ${{ secrets.FEISHU_WEBHOOK }}
+          FEISHU_APP_ID: ${{ secrets.FEISHU_APP_ID }} # 可选：应用机器人推送
+          FEISHU_APP_SECRET: ${{ secrets.FEISHU_APP_SECRET }} # 可选：应用机器人推送
+          GITHUB_REPOSITORY_OWNER: ${{ github.repository_owner }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: python main.py
+
+      - name: Commit and push changes
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          git add .
+          # 只有在有变动时才提交，防止报错
+          git diff --quiet && git diff --staged --quiet || git commit -m "Auto-update: $(date +'%Y-%m-%d')"
+
+          # 关键点：先拉取远程的最新改动（比如你手动删除的操作），再把机器人的改动接在后面
+          git pull --rebase origin main
+
+          git push origin main
+
+      - name: Deploy to Pages
+        uses: peaceiris/actions-gh-pages@v3
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./
+          publish_branch: gh-pages
