@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🤖 具身大模型简报 - 2608.05248 - WorldClaw: Agentic 3D Open-World Generation at Scale (WorldClaw：基于智能体架构的大规模3D开放世界生成)</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/github-markdown-css/5.2.0/github-markdown.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script>
+        window.MathJax = {
+            tex: { inlineMath: [['$', '$'], ['\(', '\)']], displayMath: [['$$', '$$'], ['\[', '\]']] },
+            options: { skipHtmlTags: ['script', 'style', 'textarea'] }
+        };
+    </script>
+    <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+    <style>
+        .markdown-body { box-sizing: border-box; min-width: 200px; max-width: 980px; margin: 0 auto; padding: 45px; }
+        @media (max-width: 767px) { .markdown-body { padding: 15px; } }
+    </style>
+</head>
+<body class="markdown-body">
+    <a href='../index.html' style='margin-bottom:20px; display:block;'>← 返回主索引</a>
+    <h1>🤖 具身大模型简报 - 2608.05248 - WorldClaw: Agentic 3D Open-World Generation at Scale (WorldClaw：基于智能体架构的大规模3D开放世界生成)</h1>
+    <div id="content"></div>
+    <script type="text/markdown" id="raw-markdown">### 1. 🔥 [WorldClaw: Agentic 3D Open-World Generation at Scale](https://arxiv.org/abs/2608.05248) (WorldClaw：基于智能体架构的大规模3D开放世界生成)
+- **研究机构**: `Tencent (腾讯混元团队)`
+- **Arxiv ID**: `2608.05248` | [点击跳转](https://arxiv.org/abs/2608.05248)
+
+**0. 论文标题**
+- **英文标题**: WorldClaw: Agentic 3D Open-World Generation at Scale
+- **中文标题**: WorldClaw：基于智能体架构的大规模3D开放世界生成
+- **研究机构**: Tencent (腾讯混元团队)
+
+**1. 整体逻辑**
+- **研究任务**: 根据开放式的文本提示，生成大规模、可自由探索且资产可编辑的3D开放世界场景。
+- **研究动机**: 现有的3D场景生成方法都有明显短板：程序化生成（PCG）受限于硬编码规则，内容单调；视频/图像提升方法（Video-Lifting）缺乏全局几何一致性，且新视角容易模糊；原生3D扩散模型受限于数据集规模，多样性差；而现有的多模态大模型智能体（MLLM-Agents）虽然擅长全局规划，但缺乏精确的3D空间尺度感知，调整物体时容易出现比例失调或位置错误。
+- **本质改动**: 放弃“一次性端到端生成整个世界”的思路，改为“先搭全局地形骨架，再往局部区域填3D物体”的从粗到细策略。同时引入了基于渲染反馈的智能体微调闭环，专门解决物体悬空、穿模和比例失调问题。
+- **技术溯源**: 基于多模态大语言模型（MLLM，作为Agent大脑进行规划和工具调用）、Hunyuan3D（用于Image-to-3D资产生成）、GPT-Image-2（用于生成2D布局图和概念图）以及 BlenderMCP（用于控制Blender进行渲染和参数调整）。
+
+**2. 技术拆解**
+- **重点改进**: 将3D世界生成解耦为“全局地形生成”和“局部区域物体生成”两个阶段。全局地形用程序化方法保证大尺度几何连贯性，局部物体用“2D图像编辑+图生3D”保证细节丰富度，最后用Agent视觉反馈做物理接触修正。
+- **架构细节**: 整个Pipeline分为三步：
+  1. **意图分析与规划**: Agent将用户的短文本转化为结构化的场景规范（包含区域划分、地形参数、物体类别、材质和空间关系）。
+  2. **全局地形生成**: Agent生成一张2D语义布局图（不同颜色代表不同区域），结合程序化噪声和地貌算子（如山峰、沙丘）生成全局高度场（Height-Field）。然后在对应区域散布基础资产（石头、植被）并赋予材质。
+  3. **局部物体生成与放置**: 针对需要细节的区域，把局部地形渲染成2D图像，用图像编辑模型在图上“画”出目标物体。接着用 Hunyuan3D 将这些物体转成3D Mesh，并根据地形高度和法线放置到场景中。
+- **核心 Loss**: 本文是一个基于Agent调用各种生成模型的Pipeline系统，**没有传统意义上的端到端训练Loss**。其优化依赖于“基于渲染的反馈循环（Render-based refinement）”：Agent通过BlenderMCP渲染当前场景，观察几何过渡、材质比例和物体接触情况，然后通过代码直接调整地形参数、物体位姿和缩放，直到视觉效果合理为止。
+
+**3. 实验结果**
+- **数据集和baseline**: 对比了四类主流方法：PCG（如 Infinigen）、图像/视频提升（如 Marble）、原生3D扩散（如 XCube, BlockFusion）以及现有的 MLLM-Agents（如 Holodeck, SAGE, SceneSmith）。
+- **评价指标**: 由于是开放世界生成，主要采用定性评价（Qualitative Comparison）。评价维度包括：地形与区域组织的合理性、内容丰富度与文本提示词的对齐程度、自由视角下的外观与几何一致性。
+- **实验结果**: （注：论文提供的文本中未包含具体定量表格，主要为定性结论）
+  1. 相比PCG，WorldClaw生成的场景内容更丰富，且能精准对齐复杂的文本提示词。
+  2. 相比视频/图像提升方法，WorldClaw输出的是显式的、可编辑的纹理Mesh，几何保真度高，支持真正的自由视角探索，不会出现新视角模糊的问题。
+  3. 相比之前的Agent方法，WorldClaw通过“2D编辑+3D重建”和“渲染反馈微调”，显著改善了空间布局的合理性，解决了物体尺度失调、穿模和悬空等物理接触问题。整体场景既保持了全局地形的连贯，又具备高质量的局部细节。
+
+---
+</script>
+    <script>
+        const rawMdElement = document.getElementById('raw-markdown');
+        if (rawMdElement) {
+            document.getElementById('content').innerHTML = marked.parse(rawMdElement.textContent);
+            if (window.MathJax && window.MathJax.typesetPromise) {
+                window.MathJax.typesetPromise();
+            }
+        }
+    </script>
+</body>
+</html>
