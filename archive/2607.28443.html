@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>📄 Paper Report - 2607.28443 - One Future, Every Robot: Label-Efficient Collective-State Prediction with Decentralized JEPA (一未来，每机器人：基于去中心化JEPA的标签高效集群状态预测)</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/github-markdown-css/5.2.0/github-markdown.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script>
+        window.MathJax = {
+            tex: { inlineMath: [['$', '$'], ['\(', '\)']], displayMath: [['$$', '$$'], ['\[', '\]']] },
+            options: { skipHtmlTags: ['script', 'style', 'textarea'] }
+        };
+    </script>
+    <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+    <style>
+        .markdown-body { box-sizing: border-box; min-width: 200px; max-width: 980px; margin: 0 auto; padding: 45px; }
+        @media (max-width: 767px) { .markdown-body { padding: 15px; } }
+    </style>
+</head>
+<body class="markdown-body">
+    <a href='../index.html' style='margin-bottom:20px; display:block;'>← 返回主索引</a>
+    <h1>📄 Paper Report - 2607.28443 - One Future, Every Robot: Label-Efficient Collective-State Prediction with Decentralized JEPA (一未来，每机器人：基于去中心化JEPA的标签高效集群状态预测)</h1>
+    <div id="content"></div>
+    <script type="text/markdown" id="raw-markdown">### 1. 🔥 [One Future, Every Robot: Label-Efficient Collective-State Prediction with Decentralized JEPA](https://arxiv.org/abs/2607.28443) (一未来，每机器人：基于去中心化JEPA的标签高效集群状态预测)
+- **研究机构**: `ITMO University (俄罗斯圣彼得堡国立信息技术机械与光学大学)`
+- **Arxiv ID**: `2607.28443` | [点击跳转](https://arxiv.org/abs/2607.28443)
+
+**0. 论文标题**
+- **英文标题**: One Future, Every Robot: Label-Efficient Collective-State Prediction with Decentralized JEPA
+- **中文标题**: 一未来，每机器人：基于去中心化JEPA的标签高效集群状态预测
+- **研究机构**: ITMO University (俄罗斯圣彼得堡国立信息技术机械与光学大学)
+- **一句话总结**: 提出了一种去中心化的JEPA架构，让集群中的每个机器人仅靠局部观测和邻居通信，就能独立预测出一致的集群未来全局潜在状态，无需显式的一致性约束，且在极少全局标签下保持了极高的预测精度和下游控制效用。
+
+**1. 整体逻辑**
+- **研究任务**: 去中心化机器人集群的全局状态预测（Collective-State Prediction）。即让每个机器人独立推断整个集群未来的宏观物理状态（如极化、连通性、任务得分等）。
+- **研究动机**: 现有方法要么依赖中心节点，要么需要在输出端做显式的一致性约束（consensus loss）。在完全去中心化且带宽受限的场景下，各个机器人基于不同的局部证据，如何得出兼容的全局未来预测，是一个未解决的难题。
+- **本质改动**: 摒弃了直接预测原始物理状态或显式对齐各机器人输出的做法，改为让所有机器人共同预测同一个“固定宽度的潜在未来目标（latent future target）”。通过共享的预测目标自然实现语义对齐，将一致性损失的权重设为零。
+- **技术溯源**: 基于 JEPA (Joint-Embedding Predictive Architecture)、多智能体表征学习、以及处理置换不变性的集合函数/图结构。
+
+**2. 技术拆解**
+- **核心方法**: Collective-State JEPA (CS-JEPA)。包含局部循环通信模块、共享潜在目标构建模块、以及预测与锚点重建机制。
+- **关键细节**: 
+  - **通信机制**：每个机器人维护一个64维的GRU隐藏状态，每步仅向邻居广播该状态（256字节/边/步），接收端对邻居状态求均值后与自身观测拼接更新，保证信息多跳传递且不暴露他人预测。
+  - **目标构建**：使用冻结编码器提取未来所有活跃机器人的特征，通过置换不变的分词器（tokenizer）生成1个全局token（均值+存在质量）和4x4个空间token，总计17×65=1105维的固定宽度目标，不随集群规模变化。
+  - **模型规模**：在线可训练参数约13.9万，部署时表征参数约12.3万。
+- **训练/优化目标**: 
+  - **主损失 ($\mathcal{L}_{CS}$)**：每个机器人独立预测上述1105维共享潜在目标的MSE损失（无一致性约束）。
+  - **辅助损失 ($\mathcal{L}_{anchor}$)**：训练时特有的接收者锚点损失，用于预测该机器人自身的未来冻结嵌入，防止丢失个体动力学信息。
+  - **总损失**：$\mathcal{L}_{CS-JEPA} = \mathcal{L}_{CS} + 2 \times \mathcal{L}_{anchor}$。
+
+**3. 实验结果**
+- **实验设置**: 
+  - **数据集与任务**：在仿真环境中进行集群聚集（flocking）、编队（formation）和覆盖（coverage）任务。训练图拓扑为 small-world（10-18个机器人），测试包含拓扑偏移（ring, mutual-kNN）和规模偏移（36-108个机器人，最大6倍）。
+  - **对比对象（Baseline）**：Future-Recon（未来重建）。保持完全相同的网络架构、通信、锚点机制和参数量，仅将预测目标从“潜在状态”改为直接重建“原始物理状态（位置、速度等）”。
+- **评价指标**: 
+  - **标签效率**：使用极少全局标签（6/12/24个episode）训练线性探针（Ridge probe）解码10个集群物理指标。
+  - **准确率 (Accuracy)**：预测物理指标与真实值的归一化MSE（越低越好）。
+  - **一致性 (Agreement)**：同一episode内各机器人预测结果的离散度MSE（越低越好）。
+- **主要结果**: 
+  - 在没有一致性损失的情况下，CS-JEPA 的预测一致性显著提升，且准确率也同步提高（排除了退化为常数预测的平凡解）。
+  - 相比 Baseline，CS-JEPA 在分布内的预测误差降低了 28.4%；在拓扑和集群规模发生偏移（OOD）时，误差大幅降低了 64.4%–75.6%。
+  - 通过平移不变性控制和交叉预训练控制验证了结论的可靠性。
+  - 在动作条件的反事实价值估计和完全去中心化的刚体控制下游任务中，证明了该共享潜在表征能有效支持机器人独立的决策与执行。
+
+---
+</script>
+    <script>
+        const rawMdElement = document.getElementById('raw-markdown');
+        if (rawMdElement) {
+            document.getElementById('content').innerHTML = marked.parse(rawMdElement.textContent);
+            if (window.MathJax && window.MathJax.typesetPromise) {
+                window.MathJax.typesetPromise();
+            }
+        }
+    </script>
+</body>
+</html>
