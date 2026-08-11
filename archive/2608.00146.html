@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>📄 Paper Report - 2608.00146 - DiffusionGemma (DiffusionGemma：基于离散扩散的高速文本生成模型)</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/github-markdown-css/5.2.0/github-markdown.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script>
+        window.MathJax = {
+            tex: { inlineMath: [['$', '$'], ['\(', '\)']], displayMath: [['$$', '$$'], ['\[', '\]']] },
+            options: { skipHtmlTags: ['script', 'style', 'textarea'] }
+        };
+    </script>
+    <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+    <style>
+        .markdown-body { box-sizing: border-box; min-width: 200px; max-width: 980px; margin: 0 auto; padding: 45px; }
+        @media (max-width: 767px) { .markdown-body { padding: 15px; } }
+    </style>
+</head>
+<body class="markdown-body">
+    <a href='../index.html' style='margin-bottom:20px; display:block;'>← 返回主索引</a>
+    <h1>📄 Paper Report - 2608.00146 - DiffusionGemma (DiffusionGemma：基于离散扩散的高速文本生成模型)</h1>
+    <div id="content"></div>
+    <script type="text/markdown" id="raw-markdown">### 1. 🔥 [DiffusionGemma](https://arxiv.org/abs/2608.00146) (DiffusionGemma：基于离散扩散的高速文本生成模型)
+- **研究机构**: `（原文未明确）`
+- **Arxiv ID**: `2608.00146` | [点击跳转](https://arxiv.org/abs/2608.00146)
+
+**0. 论文标题**
+- **英文标题**: DiffusionGemma
+- **中文标题**: DiffusionGemma：基于离散扩散的高速文本生成模型
+- **研究机构**: （原文未明确）
+- **一句话总结**: 通过将MoE架构的Gemma 4微调为离散扩散模型，实现单卡H100上约1500 tokens/s的并行文本生成，同时保留了多模态、长上下文及思考模式等原有能力。
+
+**1. 整体逻辑**
+- **研究任务**: 大语言模型的推理加速与高效文本生成。
+- **研究动机**: 传统自回归（AR）大模型受限于逐token顺序解码的机制，存在固有的速度瓶颈，即使引入推测解码（speculative decoding）等加速技术，提升空间依然有限。
+- **本质改动**: 抛弃自回归的逐token生成范式，改用离散扩散模型（Discrete Diffusion）并行迭代生成token块，将顺序解码转化为并行去噪过程。
+- **技术溯源**: 基于 Google 的 Gemma 4 模型（采用 MoE 架构，3.8B 激活参数，25.2B 总参数）。
+
+**2. 技术拆解**
+- **核心方法**: 提出一种计算高效的两阶段微调管线，将现有的 AR 模型改造为离散扩散模型，而非从头训练。总训练 token 预算不到原 AR 模型的 10%。
+- **关键细节**: 
+  - **生成机制**: 每次前向传播并行迭代细化 256 个 token 的块（blocks），而非逐个生成。
+  - **模型规模**: 继承 Gemma 4 的 MoE 架构（3.8B 激活 / 25.2B 总参数）。
+- **训练/优化目标**: 
+  - **第一阶段**: 监督微调（SFT），优化目标是让模型学习双向去噪（bidirectional denoising）。
+  - **第二阶段**: 强化学习（RL）结合采样器蒸馏（sampler distillation），联合优化生成质量与推理效率。
+
+**3. 实验结果**
+- **实验设置**: 
+  - **硬件环境**: 单张 NVIDIA H100 GPU。
+  - **对比对象**: 带有最先进推测解码（SOTA speculative decoding）的自回归（AR）模型。
+  - **评估数据集**: 内部全量评估套件（原文未明确具体数据集名称）。
+- **评价指标**: 生成速度（每次前向传播生成的 token 数、每秒输出 token 数）以及模型综合能力（速度-能力 Pareto 前沿）。
+- **主要结果**: 
+  - **推理速度**: 平均每次前向传播生成约 20 个 token；在单卡 H100 上达到约 1,500 output tokens/second，大幅快于使用推测解码的 AR 模型。
+  - **能力表现**: 在生成速度与模型能力之间建立了新的 Pareto 前沿。
+  - **特性保留**: 扩散微调后，模型依然支持思考模式（thinking mode）、多模态输入和长上下文处理。
+  - **架构兼容**: 微调后的模型仍能以轻微的性能下降为代价进行 AR 生成，验证了未来采用“扩散-AR 混合解码”路径的可行性。
+
+---
+</script>
+    <script>
+        const rawMdElement = document.getElementById('raw-markdown');
+        if (rawMdElement) {
+            document.getElementById('content').innerHTML = marked.parse(rawMdElement.textContent);
+            if (window.MathJax && window.MathJax.typesetPromise) {
+                window.MathJax.typesetPromise();
+            }
+        }
+    </script>
+</body>
+</html>
