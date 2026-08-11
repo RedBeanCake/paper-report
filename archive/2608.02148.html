@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🤖 具身大模型简报 - 2608.02148 - Douyin Multimodal Embedding (DME) (抖音多模态嵌入模型)</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/github-markdown-css/5.2.0/github-markdown.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script>
+        window.MathJax = {
+            tex: { inlineMath: [['$', '$'], ['\(', '\)']], displayMath: [['$$', '$$'], ['\[', '\]']] },
+            options: { skipHtmlTags: ['script', 'style', 'textarea'] }
+        };
+    </script>
+    <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+    <style>
+        .markdown-body { box-sizing: border-box; min-width: 200px; max-width: 980px; margin: 0 auto; padding: 45px; }
+        @media (max-width: 767px) { .markdown-body { padding: 15px; } }
+    </style>
+</head>
+<body class="markdown-body">
+    <a href='../index.html' style='margin-bottom:20px; display:block;'>← 返回主索引</a>
+    <h1>🤖 具身大模型简报 - 2608.02148 - Douyin Multimodal Embedding (DME) (抖音多模态嵌入模型)</h1>
+    <div id="content"></div>
+    <script type="text/markdown" id="raw-markdown">### 1. 🔥 [Douyin Multimodal Embedding (DME)](https://arxiv.org/abs/2608.02148) (抖音多模态嵌入模型)
+- **研究机构**: `字节跳动（抖音团队）`
+- **Arxiv ID**: `2608.02148` | [点击跳转](https://arxiv.org/abs/2608.02148)
+
+**0. 论文标题**
+- **英文标题**: Douyin Multimodal Embedding (DME)
+- **中文标题**: 抖音多模态嵌入模型
+- **研究机构**: 字节跳动（抖音团队）
+
+**1. 整体逻辑**
+- **研究任务**: 多模态表征学习（多模态 Embedding），把多模态的查询（Query）和内容（Target）编码成向量，用于工业级的搜索和推荐系统。
+- **研究动机**: 现有的多模态大模型（MLLM）做 Embedding 面临两难：传统的对比学习模型推理快，但监督信号太粗，细粒度区分能力差；基于思维链（CoT）生成的模型区分度好，但生成过程太慢，根本没法在十亿级规模的线上环境实时跑。
+- **本质改动**: 用两阶段训练把两者的优点结合。第一阶段做常规的大规模对比预训练打底；第二阶段在训练时加入“隐空间推理”和“交叉重建”来逼迫模型学到细粒度特征。关键是这些复杂机制只在训练时生效，推理时直接丢弃，只保留轻量级的对比编码器，保证线上推理速度。
+- **技术溯源**: 基于多模态大语言模型（MLLM）基座，具体训练了 2B 和 9B 两个参数规模的版本。
+
+**2. 技术拆解**
+- **重点改进**: 第二阶段引入了两个核心机制：1) 基于证据的类型化隐空间推理（Evidence-Grounded Typed Latent Reasoning），在隐藏层特征空间里组织检索证据进行推理，而不是显式生成文本；2) 交叉条件重建（Cross-Conditional Reconstruction），通过双向的自回归重建，强制模型在 Embedding 中保留对端（counterpart-side）的细粒度语义。
+- **架构细节**: 模型包含 2B 和 9B 两个规模。输入是图文、视频等多模态 Query 和 Target，输出是 Embedding 向量。核心设计是“训练-推理不对称”：训练时走完整的推理和重建分支，推理时只走前向的对比编码分支，查询端的计算开销增加极小，和标准对比编码器一样快。
+- **核心 Loss**: 第一阶段主要是常规的对比学习 Loss；第二阶段在对比 Loss 的基础上，增加了隐空间推理的辅助 Loss，以及交叉方向自回归重建的 Loss。
+
+**3. 实验结果**
+- **数据集和baseline**: 公开数据集 MMEB-v2，以及抖音内部的离线评估集。对比的 baseline 是同等参数规模下的主流对比学习 Embedding 模型和基于 CoT 生成的 Embedding 模型。
+- **评价指标**: MMEB-v2 综合得分（重点看视频和视觉文档任务），内部离线评估的相对收益，以及线上 A/B 测试的 LT（生命周期）指标。
+- **实验结果**: 在 MMEB-v2 上，2B 和 9B 版本分别拿到 74.8 和 78.4 分，达到同规模 SOTA。在抖音内部离线集上相对提升 2.92%。模型已上线抖音的生成式搜索、图像搜索和 AI 搜索等场景，线上 A/B 测试中搜索业务的 LT 指标提升了 0.1%（在搜推业务中属于显著收益）。
+
+---
+</script>
+    <script>
+        const rawMdElement = document.getElementById('raw-markdown');
+        if (rawMdElement) {
+            document.getElementById('content').innerHTML = marked.parse(rawMdElement.textContent);
+            if (window.MathJax && window.MathJax.typesetPromise) {
+                window.MathJax.typesetPromise();
+            }
+        }
+    </script>
+</body>
+</html>
