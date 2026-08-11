@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>📄 Paper Report - 2608.07408 - Addressable Memory for Video World Models (视频世界模型的可寻址内存)</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/github-markdown-css/5.2.0/github-markdown.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script>
+        window.MathJax = {
+            tex: { inlineMath: [['$', '$'], ['\(', '\)']], displayMath: [['$$', '$$'], ['\[', '\]']] },
+            options: { skipHtmlTags: ['script', 'style', 'textarea'] }
+        };
+    </script>
+    <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+    <style>
+        .markdown-body { box-sizing: border-box; min-width: 200px; max-width: 980px; margin: 0 auto; padding: 45px; }
+        @media (max-width: 767px) { .markdown-body { padding: 15px; } }
+    </style>
+</head>
+<body class="markdown-body">
+    <a href='../index.html' style='margin-bottom:20px; display:block;'>← 返回主索引</a>
+    <h1>📄 Paper Report - 2608.07408 - Addressable Memory for Video World Models (视频世界模型的可寻址内存)</h1>
+    <div id="content"></div>
+    <script type="text/markdown" id="raw-markdown">### 1. 🔥 [Addressable Memory for Video World Models](https://arxiv.org/abs/2608.07408) (视频世界模型的可寻址内存)
+- **研究机构**: `NVIDIA, Princeton University, University of Toronto, Vector Institute`
+- **Arxiv ID**: `2608.07408` | [点击跳转](https://arxiv.org/abs/2608.07408)
+
+**0. 论文标题**
+- **英文标题**: Addressable Memory for Video World Models
+- **中文标题**: 视频世界模型的可寻址内存
+- **研究机构**: NVIDIA, Princeton University, University of Toronto, Vector Institute
+- **一句话总结**: 提出无需训练的 WorldTrace 框架，通过为 KV Cache 分配训练分布内的虚拟位置并在规范空间进行压缩，解决了视频世界模型在长序列生成时历史记忆“找不到”且“读不懂”的问题。
+
+**1. 整体逻辑**
+- **研究任务**: 自回归视频世界模型的长序列视频生成。核心目标是保持“视觉持久性”（Visual Persistence），即模型在生成长视频或用户绕大圈回到原场景时，能生成与之前一致的画面。
+- **研究动机**: 现有模型在生成序列超过训练上下文长度时，视觉持久性会急剧下降。作者发现这是两个耦合的瓶颈导致的：
+  1. **不可寻址（Unaddressable）**：随着序列变长，历史 token 的相对位置偏移（RoPE offset）超出了训练分布，导致模型通过注意力机制“找不到”或“读不懂”缓存里的历史。
+  2. **信息丢失（Uninformative）**：如果直接在 RoPE 旋转空间对历史 KV 进行平均压缩，不同时间步的旋转相位会相互抵消（相位抵消效应），导致压缩后的摘要变成无效信息。
+- **本质改动**: 把 KV Cache 压缩问题拆解为“位置寻址”和“内容压缩”两步。给每个压缩槽分配一个固定的、在训练分布内的“虚拟位置”来解决寻址；把 Key 先反旋转到规范空间（canonical space）再进行压缩，最后再旋转到虚拟位置，来解决相位抵消问题。
+- **技术溯源**: 基于自回归视频世界模型（如 Matrix-Game-2），以及 Transformer 的 KV Cache 机制和 RoPE（旋转位置编码）。
+
+**2. 技术拆解**
+- **核心方法**: 提出 WorldTrace 框架。包含虚拟位置分配机制，以及两种针对不同需求的内存压缩算子（WorldTrace-Field 和 WorldTrace-Landmark）。
+- **关键细节**: 
+  - **Cache 结构**：将上下文窗口分为“最近窗口”（存原始帧）和“摘要缓存”（存压缩历史）。
+  - **虚拟位置分配**：根据 slot 的排名（rank）分配虚拟位置。这确保了所有摘要槽的相对位置偏移始终落在训练见过的范围内，且彼此可区分（解决了现有方法如 Block-relative RoPE 导致的位置坍塌问题）。
+  - **WorldTrace-Field（面向时间连贯性）**：将历史帧的 Key 反旋转到规范空间，按时间块求平均，然后再旋转到对应的虚拟位置。Value 直接求平均。这相当于对历史进行平滑压缩。
+  - **WorldTrace-Landmark（面向情景回忆）**：通过计算相邻帧规范空间 Key 的余弦距离来检测“场景切换”。将切换时的关键帧（Landmark）的 Key 在规范空间冻结存储，避免多次反旋转/重旋转带来的浮点误差累积，专门用于长距离的关键场景回忆。
+- **训练/优化目标**: 这是一个**无需训练（training-free）** 的推理时 KV Cache 管理方法，没有传统的损失函数。其核心机制是将内存压缩形式化为结构化稀疏注意力（Structured Sparse Attention），通过设计投影矩阵来近似全注意力，从而在固定 Cache 预算下保留最有用的历史信息。
+
+**3. 实验结果**
+- **实验设置**: 
+  - **数据集与基准**: 使用了作者新提出的 **LoopBench**（一个专门评估压缩缓存能否在长距离绕路后重建之前访问过的场景的基准），以及常规的视频生成评估。
+  - **对比对象**: 滑动窗口（Sliding window）基线，以及其他位置编码/内存压缩方法（如 Block-relative RoPE, MemRoPE 等）。
+- **评价指标**: 时间一致性（Temporal consistency / Coherence）和情景回忆能力（Episodic recall）。
+- **主要结果**: 
+  - WorldTrace-Field 在长序列生成中使时间一致性提升了 15.5%。
+  - WorldTrace-Landmark 在 LoopBench 的场景重访任务中，使情景回忆能力提升了 19.5%。
+  - 验证了滑动窗口基线在几秒后就会丢失场景结构，而 WorldTrace 在无需重新训练的情况下，有效延长了视频世界模型的有效记忆跨度，成功实现了长距离的视觉持久性。
+
+---
+</script>
+    <script>
+        const rawMdElement = document.getElementById('raw-markdown');
+        if (rawMdElement) {
+            document.getElementById('content').innerHTML = marked.parse(rawMdElement.textContent);
+            if (window.MathJax && window.MathJax.typesetPromise) {
+                window.MathJax.typesetPromise();
+            }
+        }
+    </script>
+</body>
+</html>
