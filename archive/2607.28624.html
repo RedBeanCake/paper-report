@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>📄 Paper Report - 2607.28624 - PhiZero: A World Model Built Around Physical Language (PhiZero：围绕物理语言构建的世界模型)</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/github-markdown-css/5.2.0/github-markdown.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script>
+        window.MathJax = {
+            tex: { inlineMath: [['$', '$'], ['\(', '\)']], displayMath: [['$$', '$$'], ['\[', '\]']] },
+            options: { skipHtmlTags: ['script', 'style', 'textarea'] }
+        };
+    </script>
+    <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+    <style>
+        .markdown-body { box-sizing: border-box; min-width: 200px; max-width: 980px; margin: 0 auto; padding: 45px; }
+        @media (max-width: 767px) { .markdown-body { padding: 15px; } }
+    </style>
+</head>
+<body class="markdown-body">
+    <a href='../index.html' style='margin-bottom:20px; display:block;'>← 返回主索引</a>
+    <h1>📄 Paper Report - 2607.28624 - PhiZero: A World Model Built Around Physical Language (PhiZero：围绕物理语言构建的世界模型)</h1>
+    <div id="content"></div>
+    <script type="text/markdown" id="raw-markdown">### 1. 🔥 [PhiZero: A World Model Built Around Physical Language](https://arxiv.org/abs/2607.28624) (PhiZero：围绕物理语言构建的世界模型)
+- **研究机构**: `中国科学院自动化研究所 (CASIA) 等`
+- **Arxiv ID**: `2607.28624` | [点击跳转](https://arxiv.org/abs/2607.28624)
+
+**0. 论文标题**
+- **英文标题**: PhiZero: A World Model Built Around Physical Language
+- **中文标题**: PhiZero：围绕物理语言构建的世界模型
+- **研究机构**: 中国科学院自动化研究所 (CASIA) 等
+- **一句话总结**: 提出了一种基于紧凑离散“物理语言”的物理世界模型，采用“先推理后渲染”范式将物理动态推理与像素级视频生成解耦，在物理规律遵循度和视频生成质量上取得了SOTA表现。
+
+**1. 整体逻辑**
+- **研究任务**: 构建物理世界模型（Physical World Model），用于预测未来视频状态、理解物理规律，并支持交互式物理模拟和零样本动作迁移。
+- **研究动机**: 现有的视频世界模型主要在像素空间直接预测未来帧，导致底层物理动态隐式地耦合在高维视觉特征中，经常生成违背物理规律的视频。虽然人类能用自然语言进行显式的物理推理，但自然语言对复杂视觉状态转移的表示又过于粗粒度。
+- **本质改动**: 放弃直接在像素空间做自回归或扩散预测，而是学习一种紧凑的离散“物理语言”来显式表示世界状态转移。采用“先推理后渲染”（reason-then-render）范式：先在物理语言空间推理世界演化，再通过解码器渲染成视频。
+- **技术溯源**: 基于 Wan2.2 (视频扩散模型/VAE)、Q-Former、FSQ (有限标量量化)、Qwen3-VL (预训练视觉语言模型)。
+
+**2. 技术拆解**
+- **核心方法**: 
+  1. **物理语言分词器 (Physical Language Tokenizer)**：通过自监督学习从视频中提取状态转移。使用 Transition-level Q-Former 提取相邻帧的转移特征，用 FSQ 量化为离散序列。结合预训练的扩散解码器（以首帧为条件）重建视频。引入“纯噪声预热”（Pure-noise warm-up）机制，在训练初期将未来帧latent全初始化为纯噪声，防止解码器依赖自身去噪先验而忽略物理语言条件。
+  2. **物理语言推理器 (Physical Language Reasoner)**：基于预训练 VLM，扩展词表以包含 FSQ 索引。根据首帧和文本动作意图，自回归预测物理语言序列，随后交由扩散解码器渲染。
+- **关键细节**: 
+  - **Tokenizer 结构**：时空编码器用 Wan2.2 VAE，扩散解码器用 Wan2.2-5B（LoRA微调）。FSQ 量化级别为 (8,5,5,5,5,5)，词表大小 25K。Q-Former 使用 32 个 learnable queries。33帧视频编码为9个 latent states，最终生成 256 长度的物理语言序列。
+  - **Reasoner 结构**：基于 Qwen3-VL-4B 初始化。
+  - **数据规模**：50K 小时真实视频池（过滤出 10K 小时预训练，5M 个 4秒 clip 做 SFT），1K 小时仿真视频。Reasoner SFT 使用 1M 个富含运动和物理信息的 clip。
+- **训练/优化目标**: 
+  - **Tokenizer**：Flow-matching 损失（基于首帧和物理语言重建目标视频）。
+  - **Reasoner**：自回归交叉熵损失（基于首帧和文本意图预测物理语言序列）。
+
+**3. 实验结果**
+- **实验设置**: 
+  - **视频生成基准**：Physics-IQ Verified (物理结果保真度), PhyGround (物理定律遵循), WorldModelBench (通用世界建模)。
+  - **视频理解基准**：IntPhys2 (直觉物理理解), LikePhys (物理合理性判别), YoCausal (现实世界因果理解)。
+  - **对比对象**：Wan2.2, Sora 2, Cosmos3, Hunyuan-Video, Grok-Video, LTX-Video, CogVideoX 等主流视频生成与世界模型。
+- **评价指标**: 
+  - **生成**：S-IoU, ST-IoU, WS-IoU, IQ-Score, Physics Score, Physics Adherence 等。
+  - **理解**：Accuracy (Easy/Medium/Hard), Error Rate, RSI, CCI, Agg. Rank 等。
+  - **重建**：PSNR, SSIM, LPIPS, Tokens 数量。
+- **主要结果**: 
+  - **高压缩比与高保真**：Physical Language Tokenizer 仅需 256 个 tokens 即可达到 28.9 PSNR，远优于 VideoFlexTok（需 576 tokens 才达到 26.5 PSNR），证明该离散表示能高效剥离外观冗余，聚焦状态转移。
+  - **物理生成 SOTA**：在 Physics-IQ Verified 上，IQ-Score 达到 41.2，显著超越 Grok-Video (34.8) 和 Wan2.2-14B (32.2)；在 PhyGround 上，Physics Score 达到 3.01，超越 Veo3.1 (2.85)。
+  - **物理理解与因果推理**：在理解任务中表现优异，例如在 YoCausal 的 Agg. Rank 指标上达到 2.0（越低越好），优于 Wan2.2-14B (3.5) 和 LTX-Video-2B (5.0)，证明其物理语言空间具备优秀的因果推理能力。
+
+---
+</script>
+    <script>
+        const rawMdElement = document.getElementById('raw-markdown');
+        if (rawMdElement) {
+            document.getElementById('content').innerHTML = marked.parse(rawMdElement.textContent);
+            if (window.MathJax && window.MathJax.typesetPromise) {
+                window.MathJax.typesetPromise();
+            }
+        }
+    </script>
+</body>
+</html>
