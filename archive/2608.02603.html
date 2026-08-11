@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>📄 Paper Report - 2608.02603 - WorldExam: Benchmarking World Models from Apparent Appearance to Inherent Reactivity (WorldExam：从表面外观到内在反应性的世界模型基准测试)</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/github-markdown-css/5.2.0/github-markdown.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script>
+        window.MathJax = {
+            tex: { inlineMath: [['$', '$'], ['\(', '\)']], displayMath: [['$$', '$$'], ['\[', '\]']] },
+            options: { skipHtmlTags: ['script', 'style', 'textarea'] }
+        };
+    </script>
+    <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+    <style>
+        .markdown-body { box-sizing: border-box; min-width: 200px; max-width: 980px; margin: 0 auto; padding: 45px; }
+        @media (max-width: 767px) { .markdown-body { padding: 15px; } }
+    </style>
+</head>
+<body class="markdown-body">
+    <a href='../index.html' style='margin-bottom:20px; display:block;'>← 返回主索引</a>
+    <h1>📄 Paper Report - 2608.02603 - WorldExam: Benchmarking World Models from Apparent Appearance to Inherent Reactivity (WorldExam：从表面外观到内在反应性的世界模型基准测试)</h1>
+    <div id="content"></div>
+    <script type="text/markdown" id="raw-markdown">### 1. 🔥 [WorldExam: Benchmarking World Models from Apparent Appearance to Inherent Reactivity](https://arxiv.org/abs/2608.02603) (WorldExam：从表面外观到内在反应性的世界模型基准测试)
+- **研究机构**: `CASIA（中科院自动化所）、THU（清华大学）、CUHK（香港中文大学）、AMAP（高德）等`
+- **Arxiv ID**: `2608.02603` | [点击跳转](https://arxiv.org/abs/2608.02603)
+
+这是一篇关于**视频世界模型评估基准（Benchmark/Dataset）** 的工作。
+
+**0. 论文标题**
+- **英文标题**: WorldExam: Benchmarking World Models from Apparent Appearance to Inherent Reactivity
+- **中文标题**: WorldExam：从表面外观到内在反应性的世界模型基准测试
+- **研究机构**: CASIA（中科院自动化所）、THU（清华大学）、CUHK（香港中文大学）、AMAP（高德）等
+- **一句话总结**: 提出了一个包含4个诊断层级和8个任务的视频世界模型评估基准 WorldExam，首次将评估重点从“显式指令遵循”扩展到模型根据场景状态推断未明确指定后果的“内在反应性”。
+
+**1. 整体逻辑**
+- **研究任务**: 评估可控视频生成模型作为“世界模型”的能力，涵盖相机驱动、动作驱动和语言驱动三种模型范式。
+- **研究动机**: 现有基准主要评估视觉质量或显式指令是否被满足（即“指哪打哪”），但忽略了世界模型应具备的“内在反应性”（即根据物理规律和场景上下文，自动生成输入中未明确指定的合理交互后果，如人走到楼梯上自动适应高度、遇到障碍物自动避让）。
+- **本质改动**: 构建了从“表面外观”到“内在反应”的四级诊断体系，设计了专门的测试用例。在输入中只给初始状态和基础控制意图，把“场景条件反应”和“目标导向行为”留给模型自己去推断和生成，从而区分“直接完成要求”和“推断隐含后果”。
+- **技术溯源**: 评估了20个代表性视频世界模型（涵盖相机驱动如 ReCamMaster、动作驱动如 WorldPlay、语言驱动如 Kling/Veo 等）；评估 pipeline 中使用了 VGGT-Ω 进行 3D 几何重建以计算轨迹指标，使用 GPT-5.5 作为视觉语言模型裁判 (VLM judge) 进行基于清单的打分。
+
+**2. 技术拆解**
+- **核心方法**: 提出 WorldExam 基准，将评估分为四个层级：视觉质量、控制遵循度、空间一致性、世界反应性。为了兼容不同接口，将控制意图统一映射为原子控制单元，并适配到 SE(3) 相机轨迹、离散动作序列或自然语言提示。评测分为静态场景轨道（所有模型）和动态交互轨道（仅动作和语言模型）。
+- **关键细节**: 
+  - **数据规模**: 包含 1,474 个测试用例，覆盖第一/第三人称视角，涵盖多种主体（人、动物、车辆、机器人）和视觉风格。
+  - **八大任务**: 相机控制、主体控制、场景重访（测空间一致性）；地形交互、物体交互、社交交互、物理反应、目标完成（测世界反应性）。
+  - **用例构建流水线**: 动态交互任务通过“任务模式库 -> LLM生成结构化草稿 -> 生成候选初始图像 -> 人工筛选 -> 基于图像的草稿修正与清单生成”构建。确保初始图像只提供前置状态，而反应过程留给模型生成。
+- **评估机制与指标**: 
+  - **几何/轨迹类任务**（相机控制、场景重访、主体控制、地形交互）：使用 VGGT-Ω 重建生成视频的 3D 几何，通过计算恢复出的相机/主体轨迹和地形几何与 Ground Truth 的偏差来打分。
+  - **交互/反应类任务**（物体/社交/物理交互、目标完成）：使用基于清单 (Checklist) 的评估，由 GPT-5.5 作为 VLM judge 根据预定义的观察标准对生成视频进行打分。
+
+**3. 实验结果**
+- **实验设置**: 评估了 20 个代表性视频世界模型，分为相机驱动、动作驱动和语言驱动三种范式，分别在静态场景轨道和动态交互轨道上进行测试。
+- **评价指标**: 视觉质量使用任务无关的通用指标；控制遵循和空间一致性使用基于 3D 重建的几何/轨迹误差指标；世界反应性使用基于 Checklists 的 VLM 打分。
+- **主要结果**: 
+  - 揭示了明显的“能力分化” (capability split)：相机驱动模型在相机控制上表现好，但不支持动态交互；动作驱动模型对主体的控制更精确，但往往对环境的反应不足（世界不响应）；语言驱动模型在交互任务上表现更好，但遵循复杂控制的忠实度较低。
+  - 没有模型能同时具备广泛的任务覆盖率和持续优秀的表现。证明了“高视觉质量”和“显式指令遵循”并不能保证模型具备真正的“内在反应性”。
+
+---
+</script>
+    <script>
+        const rawMdElement = document.getElementById('raw-markdown');
+        if (rawMdElement) {
+            document.getElementById('content').innerHTML = marked.parse(rawMdElement.textContent);
+            if (window.MathJax && window.MathJax.typesetPromise) {
+                window.MathJax.typesetPromise();
+            }
+        }
+    </script>
+</body>
+</html>
