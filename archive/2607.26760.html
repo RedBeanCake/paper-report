@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>📄 Paper Report - 2607.26760 - （原文未提供完整标题，核心关键词为 Metis, Memory Foundation Models） (Metis：面向记忆的基础模型)</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/github-markdown-css/5.2.0/github-markdown.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script>
+        window.MathJax = {
+            tex: { inlineMath: [['$', '$'], ['\(', '\)']], displayMath: [['$$', '$$'], ['\[', '\]']] },
+            options: { skipHtmlTags: ['script', 'style', 'textarea'] }
+        };
+    </script>
+    <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+    <style>
+        .markdown-body { box-sizing: border-box; min-width: 200px; max-width: 980px; margin: 0 auto; padding: 45px; }
+        @media (max-width: 767px) { .markdown-body { padding: 15px; } }
+    </style>
+</head>
+<body class="markdown-body">
+    <a href='../index.html' style='margin-bottom:20px; display:block;'>← 返回主索引</a>
+    <h1>📄 Paper Report - 2607.26760 - （原文未提供完整标题，核心关键词为 Metis, Memory Foundation Models） (Metis：面向记忆的基础模型)</h1>
+    <div id="content"></div>
+    <script type="text/markdown" id="raw-markdown">### 1. 🔥 [（原文未提供完整标题，核心关键词为 Metis, Memory Foundation Models）](https://arxiv.org/abs/2607.26760) (Metis：面向记忆的基础模型)
+- **研究机构**: `（原文未明确）`
+- **Arxiv ID**: `2607.26760` | [点击跳转](https://arxiv.org/abs/2607.26760)
+
+**0. 论文标题**
+- **英文标题**: （原文未提供完整标题，核心关键词为 Metis, Memory Foundation Models）
+- **中文标题**: Metis：面向记忆的基础模型
+- **研究机构**: （原文未明确）
+- **一句话总结**: 提出“记忆基础模型”概念，把传统外挂的记忆模块内化为模型自身的动态隐状态，让大模型在推理时仅靠前向传播就能自主读写和更新长期记忆。
+
+**1. 整体逻辑**
+- **研究任务**: 赋予基础模型原生的长期记忆能力，替代当前AI Agent高度依赖的外部记忆模块（如RAG、向量数据库等）。
+- **研究动机**: 现有Agent的记忆主要靠外挂模块实现，与模型本体割裂。这导致记忆机制无法与模型端到端联合优化，且在系统架构和运行效率上存在瓶颈。
+- **本质改动**: 将记忆从“外部检索系统”转变为“模型内部的动态状态（Memory State）”，让模型通过自身的前向计算（Memory Procedures）来自主完成记忆的存储、读取和演化。
+- **技术溯源**: 基础模型（Foundation Models）、Transformer架构（引入Memory Attention机制）。
+
+**2. 技术拆解**
+- **核心方法**: 提出Metis架构，在基础模型中引入原生的记忆状态。历史信息被压缩进模型内部，通过“记忆注意力（Memory Attention）”机制进行访问。通过构建大规模记忆专属数据进行中期训练（Mid-training），让模型学会自主管理记忆。
+- **关键细节**: 
+  - **记忆更新**：在线记忆维护无需计算梯度（Gradient-free），更新记忆状态仅需一次前向传播（Forward pass）。
+  - **推理机制**：推理时模型权重完全冻结，原生记忆状态通过标准的前向计算自主转换和更新。
+  - **数据构造**：构建了大规模的记忆专属训练数据（Memory-specific training data）。
+- **训练/优化目标**: 引入多种优化目标，通过中期训练让模型掌握原生记忆过程（Native memory procedures）。（注：具体的损失函数形式原文未明确）。
+
+**3. 实验结果**
+- **实验设置**: （原文未明确具体的数据集与对比Baseline）。
+- **评价指标**: （原文未明确具体的评价指标）。
+- **主要结果**: 实验证明Metis成功具备了原生记忆能力，验证了原生记忆在架构设计、端到端优化和运行效率上的优势。论文还详细分析了该模型的优势、局限性及内部行为机制。代码和模型权重已开源。
+
+---
+</script>
+    <script>
+        const rawMdElement = document.getElementById('raw-markdown');
+        if (rawMdElement) {
+            document.getElementById('content').innerHTML = marked.parse(rawMdElement.textContent);
+            if (window.MathJax && window.MathJax.typesetPromise) {
+                window.MathJax.typesetPromise();
+            }
+        }
+    </script>
+</body>
+</html>
