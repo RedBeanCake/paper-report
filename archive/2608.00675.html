@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>📄 Paper Report - 2608.00675 - Round-Trip Consistency: Bidirectional Diffusion Models Can Predict Their Own Rollout Errors (往返一致性：双向扩散模型能够预测自身的推演误差)</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/github-markdown-css/5.2.0/github-markdown.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script>
+        window.MathJax = {
+            tex: { inlineMath: [['$', '$'], ['\(', '\)']], displayMath: [['$$', '$$'], ['\[', '\]']] },
+            options: { skipHtmlTags: ['script', 'style', 'textarea'] }
+        };
+    </script>
+    <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+    <style>
+        .markdown-body { box-sizing: border-box; min-width: 200px; max-width: 980px; margin: 0 auto; padding: 45px; }
+        @media (max-width: 767px) { .markdown-body { padding: 15px; } }
+    </style>
+</head>
+<body class="markdown-body">
+    <a href='../index.html' style='margin-bottom:20px; display:block;'>← 返回主索引</a>
+    <h1>📄 Paper Report - 2608.00675 - Round-Trip Consistency: Bidirectional Diffusion Models Can Predict Their Own Rollout Errors (往返一致性：双向扩散模型能够预测自身的推演误差)</h1>
+    <div id="content"></div>
+    <script type="text/markdown" id="raw-markdown">### 1. 🔥 [Round-Trip Consistency: Bidirectional Diffusion Models Can Predict Their Own Rollout Errors](https://arxiv.org/abs/2608.00675) (往返一致性：双向扩散模型能够预测自身的推演误差)
+- **研究机构**: `（原文未明确）`
+- **Arxiv ID**: `2608.00675` | [点击跳转](https://arxiv.org/abs/2608.00675)
+
+这是一篇典型的 **AI for Science / 科学计算代理模型** 方向的 **方法创新与理论分析** 论文。下面我按组会分享的逻辑，把这篇工作的核心内容拆解清楚。
+
+**0. 论文标题**
+- **英文标题**: Round-Trip Consistency: Bidirectional Diffusion Models Can Predict Their Own Rollout Errors
+- **中文标题**: 往返一致性：双向扩散模型能够预测自身的推演误差
+- **研究机构**: （原文未明确）
+- **一句话总结**: 训练了一个双向潜在扩散模型，利用“前向推演再反向推演”的往返重建误差，在测试时实现无需真值的自监督推演误差估计与不确定性量化。
+
+**1. 整体逻辑**
+- **研究任务**: 为基于自回归生成的动力学系统代理模型（如扩散模型）提供测试时的误差估计和不确定性量化（UQ）。
+- **研究动机**: 自回归模型在长序列推演时会累积误差，且输入分布会发生偏移（OOD）。在部署时没有真值（ground truth）来衡量误差。现有的 UQ 方法（如 Deep Ensembles、MC Dropout、采样方差）衡量的是模型的“分散度”（dispersion，即模型自身的分歧），而不是当前轨迹上学习到的动力学是否被准确应用，且在分布偏移下容易失效。
+- **本质改动**: 引入“时间可逆性”作为可检验的不变量。训练一个共享权重的双向扩散模型，利用“前向推演 $i$ 步再反向推演 $i$ 步”的往返误差作为无真值情况下的误差代理指标。
+- **技术溯源**: 潜在扩散模型（Latent Diffusion Models）、Diffusion Transformer (DiT) 架构。
+
+**2. 技术拆解**
+- **核心方法**: 
+  1. **双向潜在扩散动力学模型**：在潜在空间中训练单一条件扩散模型，通过方向标志 $c_d \in \{+1, -1\}$ 控制时间前向（代理求解器）或后向（逆向求解器）推演。
+  2. **往返一致性误差（Round-Trip Consistency, $\mathcal{C}_i$）**：测试时，从真实初始状态对出发，前向推演 $i$ 步得到预测状态，再从该预测状态反向推演 $i$ 步得到返回状态。计算返回状态与真实初始状态之间的均方误差（MSE），即为 $\mathcal{C}_i$。这个误差可以直接在测试时计算，不需要真值。
+- **关键细节**: 
+  - **输入输出**：物理场快照（如 512×512）通过 $\beta$-VAE 编码为 16×16×4 的潜在表示（256倍压缩），在潜在空间进行动力学学习。
+  - **模型结构**：Diffusion Transformer，使用 adaLN-Zero 注入标量条件（扩散步数、时间索引、方向标志）。上下文窗口设为 2 帧（提供速度信息）。
+  - **采样方式**：使用确定性 DDIM 采样，以保证前向-反向循环的良定义。
+- **训练/优化目标**: 
+  - **训练目标**：标准条件噪声预测损失（MSE），在训练轨迹上均匀采样物理时间 $t$ 和方向标志 $c_d$。双向训练没有额外成本，且效果优于训练两个单向专家模型。
+  - **误差校准**：使用异方差高斯校准器（heteroscedastic Gaussian calibrator），在训练集的推演上拟合对数误差的分布 $\log \mathcal{E}_i \sim \mathcal{N}(\mu(\log \mathcal{C}_i), \sigma^2(\log \mathcal{C}_i))$，从而将 $\mathcal{C}_i$ 映射为真实的误差大小。
+
+**3. 实验结果**
+- **实验设置**: 
+  - **数据集**：2D 可压缩磁流体力学（MHD，包含 OOD 测试 Orszag-Tang 涡旋）、天体物理湍流辐射混合层、自然人脸视频（CelebV-HQ）、Navier-Stokes（LE-PDE-UQ 基准）。
+  - **对比对象**：基于采样的分散度信号（S=5 rollout spread）、仅依赖深度的校准器、LE-PDE-UQ（在 NS 基准上对比）。
+- **评价指标**: Spearman/Pearson 相关系数（衡量排序和幅值一致性）、AUROC（OOD 检测）、校准误差（置信区间覆盖率、负对数似然 NLL）、选择性预测的风险-覆盖率。
+- **主要结果**: 
+  - **误差追踪**：在 MHD 测试集上，$\mathcal{C}_i$ 与真实误差的 Spearman 相关系数在固定深度达 0.91-0.98，轨迹内达 0.69，证明往返误差能准确反映真实推演误差。
+  - **误差校准**：基于 $\mathcal{C}_i$ 的校准器预测误差大小在 1.14 倍（68%）和 1.29 倍（95%）以内，比仅依赖深度的基线好 1.0 nat，且置信区间宽度减半。
+  - **OOD 检测**：在 Orszag-Tang 涡旋（OOD）上，采样分散度基线完全失效（AUROC 0.00，把 OOD 判为最安全），而 $\mathcal{C}_i$ 能完美检测（AUROC 1.0）。
+  - **选择性预测**：在 80% 覆盖率下， incurred error 降低 15%，是仅依赖深度基线的三倍。
+  - **NS 基准对比**：在 LE-PDE-UQ 的湍流 Navier-Stokes 基准上，单个双向模型达到了 10 模型集成 1.3 倍以内的精度，训练成本仅为十分之一，并实现了最佳的免训练像素级校准。
+  - **额外收益**：反向推演方向不仅用于误差估计，还可直接作为快速的逆向求解器使用。
+
+---
+</script>
+    <script>
+        const rawMdElement = document.getElementById('raw-markdown');
+        if (rawMdElement) {
+            document.getElementById('content').innerHTML = marked.parse(rawMdElement.textContent);
+            if (window.MathJax && window.MathJax.typesetPromise) {
+                window.MathJax.typesetPromise();
+            }
+        }
+    </script>
+</body>
+</html>
