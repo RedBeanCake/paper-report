@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>📄 Paper Report - 2608.06756 - Capek 0.5: An Execution-Centric Vision-Language Model for Embodied Intelligence (Capek 0.5：面向具身智能的以执行为中心的视觉语言模型)</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/github-markdown-css/5.2.0/github-markdown.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script>
+        window.MathJax = {
+            tex: { inlineMath: [['$', '$'], ['\(', '\)']], displayMath: [['$$', '$$'], ['\[', '\]']] },
+            options: { skipHtmlTags: ['script', 'style', 'textarea'] }
+        };
+    </script>
+    <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+    <style>
+        .markdown-body { box-sizing: border-box; min-width: 200px; max-width: 980px; margin: 0 auto; padding: 45px; }
+        @media (max-width: 767px) { .markdown-body { padding: 15px; } }
+    </style>
+</head>
+<body class="markdown-body">
+    <a href='../index.html' style='margin-bottom:20px; display:block;'>← 返回主索引</a>
+    <h1>📄 Paper Report - 2608.06756 - Capek 0.5: An Execution-Centric Vision-Language Model for Embodied Intelligence (Capek 0.5：面向具身智能的以执行为中心的视觉语言模型)</h1>
+    <div id="content"></div>
+    <script type="text/markdown" id="raw-markdown">### 1. 🔥 [Capek 0.5: An Execution-Centric Vision-Language Model for Embodied Intelligence](https://arxiv.org/abs/2608.06756) (Capek 0.5：面向具身智能的以执行为中心的视觉语言模型)
+- **研究机构**: `小鹏汽车 (Xiaopeng) （注：正文未显式声明机构全称，根据通讯作者邮箱推断）`
+- **Arxiv ID**: `2608.06756` | [点击跳转](https://arxiv.org/abs/2608.06756)
+
+**0. 论文标题**
+- **英文标题**: Capek 0.5: An Execution-Centric Vision-Language Model for Embodied Intelligence
+- **中文标题**: Capek 0.5：面向具身智能的以执行为中心的视觉语言模型
+- **研究机构**: 小鹏汽车 (Xiaopeng) （注：正文未显式声明机构全称，根据通讯作者邮箱推断）
+- **一句话总结**: 提出了一种按“机器人执行功能角色”划分能力的分类体系，通过“先分治训练四个能力专家，后合并与蒸馏”的两阶段策略，构建了一个能力均衡且可解释的具身视觉语言模型。
+
+**1. 整体逻辑**
+- **研究任务**: 构建用于具身智能（机器人感知、推理与决策）的统一视觉语言模型（VLM）。
+- **研究动机**: 现有的具身 VLM 后训练通常按孤立的数据集或单一任务来组织。但机器人在执行时需要的能力（如空间、时间、动作、状态）在监督信号和输出格式上差异巨大，直接混合训练容易产生优化干扰（Optimization Interference），且事后很难衡量模型到底学到了哪些能力、融合后是否发生了能力遗忘。
+- **本质改动**: 抛弃按数据集组织训练的传统做法，改为按“机器人执行过程中的功能角色”将能力划分为四大类。训练上采用“先分治、后融合”的范式：先让四个专家各自独立强化学习，再通过权重合并和策略蒸馏揉进一个单一推理模型里，解决异构目标的优化冲突。
+- **技术溯源**: 基座模型为 Qwen3.5-2B (Dense) 和 Qwen3.6-35B-A3B (MoE)；模型融合使用了 TIES (Task Vectors) 和 Routed MOPD (Multi-Teacher On-Policy Distillation)；强化学习优化使用了 GRPO。
+
+**2. 技术拆解**
+- **核心方法**: 
+  1. **执行中心的数据重构**：将训练数据按四大能力家族（空间推理、时间理解、动作引导、状态验证）重新归类，并统一输出接口（如坐标归一化、时间戳、结构化字段），全部转化为自回归文本生成任务。
+  2. **能力专家独立训练 (Specialist Training)**：四个专家从同一基座出发，使用各自对齐的数据和特定奖励函数，通过 GRPO 进行独立的强化学习。
+  3. **能力融合 (Capability Consolidation)**：先用 TIES 算法合并四个专家的权重，初始化一个统一的学生模型；再用 Routed MOPD 在学生生成的前缀上进行多教师在线策略蒸馏，最终输出一个单一 checkpoint。
+- **关键细节**: 
+  - **模型规模**：提供 2B (Dense) 和 35B-A3B (MoE，推理时激活约 3B) 两个版本。
+  - **统一输出接口**：无特定解码头。点/框/轨迹输出 $[0,1000]^2$ 的归一化坐标，时间跨度输出起止时间，状态判断输出结构化字段。
+  - **状态验证数据构建**：基于 BEHAVIOR-1K 轨迹，分为物理状态验证（使用局部因果证据判断动作结果）和任务进度估计（使用全局因果前缀估计任务完成度）。
+- **训练/优化目标**: 
+  - **专家训练阶段**：采用 Token-Level GRPO。通过组内奖励归一化计算优势（Advantage），去掉了 Critic/Value 网络；使用带 KL 正则的 token 级裁剪目标函数。包含基于 rollout 的样本筛选机制，优先保留组内奖励方差非零的 prompt。
+  - **融合阶段**：Routed MOPD 蒸馏（原文未明确具体 Loss 公式，核心机制是根据学生模型生成的 prefix 路由到对应的专家教师进行蒸馏）。
+
+**3. 实验结果**
+- **实验设置**: 
+  - **数据集与对比对象**：使用综合基准套件，包括新提出的 Capek-StateBench（状态验证基准），以及通用的空间、时间、动作引导和通用 VLM 基准。Baseline 为规模匹配的 Qwen 初始化模型，以及消融实验中的独立专家、仅 TIES、仅 MOPD 等变体。
+  - **具身环境评估**：在 EmbodiedBench 和 VIGIL 两个模拟环境中进行闭环（Closed-loop）评估。
+- **评价指标**: 各基准任务对应的标准评价指标（原文未明确列举具体指标名称，如 Accuracy 等），以及能力保留率（Consolidation Analysis）。
+- **主要结果**: 
+  - 相比基座模型，Capek 0.5-35B-A3B 在 34 个匹配的基准测试项中提升了 28 项，2B 模型提升了 30 项。
+  - 35B-A3B 模型在具身能力和通用能力上保持了强劲且均衡的表现。
+  - 融合分析证实，该方法能在单一 checkpoint 中保留所有四种专业能力，并量化了融合带来的能力损耗。
+  - 模型成功迁移到闭环具身任务执行中，验证了多能力组合在实际任务中的有效性。
+
+---
+</script>
+    <script>
+        const rawMdElement = document.getElementById('raw-markdown');
+        if (rawMdElement) {
+            document.getElementById('content').innerHTML = marked.parse(rawMdElement.textContent);
+            if (window.MathJax && window.MathJax.typesetPromise) {
+                window.MathJax.typesetPromise();
+            }
+        }
+    </script>
+</body>
+</html>
