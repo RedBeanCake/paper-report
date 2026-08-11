@@ -280,35 +280,40 @@ def build_expert_prompt(paper_id, full_text, source_label=""):
     """构造深度解析提示词"""
     source_hint = f"\n\n**解析对象**: {source_label}" if source_label else ""
     return f"""
-    Role: 你是一位具身智能领域研究员。请用平实、地道的中文对论文进行高信息密度的总结。
-    Task: 像在组会上给同事分享一样，直接讲清楚论文做了什么、改了哪里、效果如何。严禁过度修饰，严禁使用炫技式的词汇。
+    Role: 你是一位资深的AI/计算机科学研究员，能快速读懂任意方向的论文或技术文章。请用平实、地道的中文做高信息密度的总结。
+    Task: 像在组会上给同事分享一样，直接讲清楚这篇工作做了什么、改了哪里、效果如何。严禁过度修饰，严禁使用炫技式的词汇。先判断文章的领域和类型（方法创新/理论分析/系统工程/数据集/综述等），再用该领域的行话来讲。
     {source_hint}
 
-    请严格按以下结构输出（使用 Markdown）：
+    重要原则：
+    - 以下结构是通用模板。若某个字段不适用于本文（例如理论论文没有"数据集"、系统论文没有"损失函数"），直接省略该字段，不要强行编造或留空。
+    - 只写文中确实支撑得起的内容。无法从原文确认的细节，标注"（原文未明确）"，严禁猜测或脑补。
+
+    请按以下结构输出（使用 Markdown）：
 
     **0. 论文标题**
-    - **英文标题**: [在此填入论文原文标题]
-    - **中文标题**: [在此填入精准的中文翻译]
-    - **研究机构**: [在此填入作者所属的主要单位，如：DeepMind, Stanford University等]
+    - **英文标题**: [论文原文标题]
+    - **中文标题**: [精准的中文翻译]
+    - **研究机构**: [作者所属的主要单位，如 DeepMind、Stanford University 等]
+    - **一句话总结**: [用一句话讲清这篇工作最核心的贡献，让人扫一眼就知道要不要细看]
 
     **1. 整体逻辑**
-    - **研究任务**: [论文研究的任务是什么，如：根据文本生成图像]
-    - **研究动机**: [例如发现了什么问题需要改进，比如VLA生成动作的速度太慢]
-    - **本质改动**: [本质改动，如：用视频生成代替扩散策略做轨迹预测]
-    - **技术溯源**: [基于 CLIP/OpenVLA/Llama3 等哪些开源基座？]
+    - **研究任务**: [论文要解决的任务是什么，如：根据文本生成图像 / 加速大模型推理 / 构建某类基准]
+    - **研究动机**: [发现了什么问题需要改进，或现有方法有什么不足]
+    - **本质改动**: [这篇工作最核心的思路改动，一句话点破它和前人不一样在哪]
+    - **技术溯源**: [基于哪些已有工作或开源基座？如 CLIP / OpenVLA / Llama3 / Transformer 等]
 
     **2. 技术拆解**
-    - **重点改进**: [本质改动对应的模型或算法的改动]
-    - **架构细节**: [输入输出、具体的模型结构、模型规模等]
-    - **核心 Loss**: [主 Loss 构成，是否有辅助任务（如视频重建）？]
+    - **核心方法**: [本质改动对应的具体方法、算法或系统设计]
+    - **关键细节**: [输入输出、模型结构或系统架构、规模、关键超参等]
+    - **训练/优化目标**: [主要的损失函数或优化目标；若非学习类工作，说明关键算法或核心机制]
 
     **3. 实验结果**
-    - **数据集和baseline**: [实验用的数据集和对比的方法]
-    - **评价指标**: [实验用的评价指标，如何评价]
-    - **实验结果**: [比baseline好多少]
+    - **实验设置**: [用的数据集与对比对象（baseline）；系统类工作则说明测试环境与负载]
+    - **评价指标**: [用什么指标衡量、怎么评价]
+    - **主要结果**: [比 baseline 好多少，或验证了什么结论]
 
     待处理全文内容：
-    {full_text if full_text else "（全文抓取失败，请基于摘要分析核心逻辑）"}
+    {full_text if full_text else "（全文抓取失败，仅能基于摘要分析。无法确认的技术细节请标注'（摘要未提及）'，不要猜测。）"}
     """
 
 
@@ -329,7 +334,7 @@ def deep_dive_paper(item, idx):
         report = None
         try:
             completion = client_llm.chat.completions.create(
-                model="qwen3.7-max-2026-05-17",
+                model="qwen3.7-plus",
                 messages=[{"role": "user", "content": build_expert_prompt("", full_text, source_label=url)}]
             )
             report = completion.choices[0].message.content
@@ -359,7 +364,7 @@ def deep_dive_paper(item, idx):
 
     try:
         completion = client_llm.chat.completions.create(
-            model="qwen3.7-max-2026-05-17",
+            model="qwen3.7-plus",
             messages=[{"role": "user", "content": build_expert_prompt(paper_id, full_text)}]
         )
         report = completion.choices[0].message.content
@@ -398,7 +403,7 @@ def generate_single_page(entry):
     if entry.get("title_zh"):
         title = f"{title} ({entry['title_zh']})"
     if entry.get("paper_id"):
-        title = f"🤖 具身大模型简报 - {entry['paper_id']} - {title}"
+        title = f"📄 Paper Report - {entry['paper_id']} - {title}"
 
     # 全文 markdown（页面标题 = 解析标题；md 内容 = 报告正文）
     body_content = entry["md"]
@@ -502,7 +507,7 @@ def rebuild_index():
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>📚 具身大模型科研日报 - 解析存档</title>
+    <title>📚 Paper Report - 解析存档</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/github-markdown-css/5.2.0/github-markdown.min.css">
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <style>
@@ -511,7 +516,7 @@ def rebuild_index():
     </style>
 </head>
 <body class="markdown-body">
-    <h1>📚 具身大模型科研日报 - 解析存档</h1>
+    <h1>📚 Paper Report - 解析存档</h1>
     <div id="content"></div>
     <script type="text/markdown" id="raw-markdown">%s</script>
     <script>
@@ -582,7 +587,7 @@ def generate_archive_and_index(date_info, arxiv_content):
         """
 
     with open(daily_file_path, "w", encoding="utf-8") as f:
-        f.write(get_html_template(f"🤖 具身大模型简报 - {display_title}", arxiv_content or "", False, ""))
+        f.write(get_html_template(f"📄 Paper Report - {display_title}", arxiv_content or "", False, ""))
 
     rebuild_index()
 
@@ -591,7 +596,7 @@ def generate_archive_and_index(date_info, arxiv_content):
         requests.post(FEISHU_WEBHOOK, json={
             "msg_type": "interactive",
             "card": {
-                "header": {"title": {"tag": "plain_text", "content": f"🌟 具身精选 | {display_title}"}, "template": "blue"},
+                "header": {"title": {"tag": "plain_text", "content": f"📊 Paper Report | {display_title}"}, "template": "blue"},
                 "elements": [
                     {"tag": "div", "text": {"tag": "lark_md", "content": f"今日共包含 **{vla_count}** 篇 VLA 筛选论文。"}},
                     {"tag": "action", "actions": [{"tag": "button", "text": {"tag": "plain_text", "content": "🌐 查看网页"}, "type": "primary", "url": GITHUB_PAGES_URL}]}
