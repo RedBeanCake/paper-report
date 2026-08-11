@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>📄 Paper Report - 2608.04956 - ContextMaster: Interactive Multi-Shot Video Creation via Fixed-Budget Sparse Context Routing (ContextMaster：通过固定预算稀疏上下文路由实现交互式多镜头视频创作)</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/github-markdown-css/5.2.0/github-markdown.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script>
+        window.MathJax = {
+            tex: { inlineMath: [['$', '$'], ['\(', '\)']], displayMath: [['$$', '$$'], ['\[', '\]']] },
+            options: { skipHtmlTags: ['script', 'style', 'textarea'] }
+        };
+    </script>
+    <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+    <style>
+        .markdown-body { box-sizing: border-box; min-width: 200px; max-width: 980px; margin: 0 auto; padding: 45px; }
+        @media (max-width: 767px) { .markdown-body { padding: 15px; } }
+    </style>
+</head>
+<body class="markdown-body">
+    <a href='../index.html' style='margin-bottom:20px; display:block;'>← 返回主索引</a>
+    <h1>📄 Paper Report - 2608.04956 - ContextMaster: Interactive Multi-Shot Video Creation via Fixed-Budget Sparse Context Routing (ContextMaster：通过固定预算稀疏上下文路由实现交互式多镜头视频创作)</h1>
+    <div id="content"></div>
+    <script type="text/markdown" id="raw-markdown">### 1. 🔥 [ContextMaster: Interactive Multi-Shot Video Creation via Fixed-Budget Sparse Context Routing](https://arxiv.org/abs/2608.04956) (ContextMaster：通过固定预算稀疏上下文路由实现交互式多镜头视频创作)
+- **研究机构**: `清华大学、快手 Kling Team、南京大学、上海科技大学、香港科技大学`
+- **Arxiv ID**: `2608.04956` | [点击跳转](https://arxiv.org/abs/2608.04956)
+
+**0. 论文标题**
+- **英文标题**: ContextMaster: Interactive Multi-Shot Video Creation via Fixed-Budget Sparse Context Routing
+- **中文标题**: ContextMaster：通过固定预算稀疏上下文路由实现交互式多镜头视频创作
+- **研究机构**: 清华大学、快手 Kling Team、南京大学、上海科技大学、香港科技大学
+- **一句话总结**: 提出 ContextMaster，通过角色感知位置编码、固定预算稀疏注意力和特权上下文蒸馏，实现了一个支持文本生成、参考图引导和视频编辑的统一交互式多镜头视频模型，在单卡上达到 16 FPS。
+
+**1. 整体逻辑**
+- **研究任务**: 交互式多镜头视频创作 (Interactive Multi-Shot Video Creation, IMVC)。即在一个统一的模型中，支持文本生成视频 (T2MV)、参考图生成视频 (R2MV) 和多镜头视频编辑 (V2MV)，并在多轮交互中维护共享的视觉历史。
+- **研究动机**: 现有的视频模型虽然集成了生成、参考条件控制和编辑功能，但通常将它们作为独立接口处理固定输入。在实际创作中，这些操作需要在一个不断增长的视觉历史中组合进行。随着交互轮数增加，上下文（历史镜头、参考图、源视频）不断增长，导致每次去噪时的上下文读取成本线性增加，无法满足交互式创作的延迟要求。此外，不同视觉输入（参考图、历史、源视频、目标）具有不同的时间语义，直接拼接会混淆位置编码。
+- **本质改动**: 
+  1. 引入角色感知旋转位置编码 (Role-aware RoPE) 区分不同视觉输入的语义；
+  2. 设计可缓存的固定预算上下文 (Cacheable Fixed-Budget Context)，通过非对称注意力和约束池 (ConstraintSink) 限制目标查询的活跃读取预算，使计算成本与历史长度解耦；
+  3. 提出特权上下文蒸馏 (Privileged Context Distillation)，用全上下文密集教师模型指导稀疏少步学生模型，解决稀疏读取和少步采样带来的误差。
+- **技术溯源**: 基于 Wan2.1-T2V-1.3B 视频生成模型初始化。结合了 RoPE (旋转位置编码)、Block-sparse attention (块稀疏注意力)、Consistency Distillation (一致性蒸馏) 和 Distribution Matching Distillation (分布匹配蒸馏, DMD)。
+
+**2. 技术拆解**
+- **核心方法**: 
+  1. **角色感知上下文表示**: 将参考图、历史、源视频和目标噪声 latents 拼接，使用 Role-aware RoPE。为不同角色（参考、历史、源、目标）分配不同的相位偏移，在保留时间对齐的同时区分语义角色（例如编辑时源和目标共享时间坐标但相位不同）。
+  2. **可缓存固定预算上下文**: 上下文分支 (Clean context) 的 KV 缓存每轮交互只计算一次，去噪时复用。目标分支到上下文的注意力采用块稀疏注意力，设定固定的活跃读取预算 $B$。引入 ConstraintSink，强制保留参考图和与目标时间对齐的源视频块，剩余预算根据内容相关性动态路由给源视频和历史镜头。
+  3. **特权上下文蒸馏 (PCD)**: 两阶段训练。第一阶段，用读取全上下文的密集教师模型，通过一致性蒸馏将全上下文去噪行为迁移给受预算限制的学生模型，并内化 CFG 引导（推理时无需无条件前向传播）。第二阶段，使用分布匹配蒸馏 (DMD) 在部署匹配的 rollout 上微调学生模型，恢复感知细节并减少自回归生成历史中的累积误差。
+- **关键细节**: 
+  - **输入输出**: 输入为文本指令、可选参考图、可选源视频和历史镜头；输出为当前轮次的视频镜头。
+  - **模型结构与规模**: 基于 Transformer 的视频扩散模型，参数量 1.3B。
+  - **关键超参**: 生成视频分辨率 832×480，每个镜头 81 帧。部署学生模型使用 4 个去噪步数，固定活跃读取预算为 6 个帧当量 (6 FE)。
+- **训练/优化目标**: 
+  - **第一阶段 (PCD)**: 一致性蒸馏损失 $\mathcal{L}_{CD}$。最小化学生模型在相邻噪声水平下预测的干净样本差异，目标由全上下文教师模型提供。
+  - **第二阶段 (DMD)**: 分布匹配损失 $\mathcal{L}_{DMD}$。通过对比学生模型（fake-score）和全上下文真实得分模型（real-score）的预测差异来优化，并在自回归生成的完整 rollout 上进行。
+
+**3. 实验结果**
+- **实验设置**: 
+  - **数据集**: 自建测试集。T2MV (100个多镜头提示), R2MV (50个参考条件案例), V2MV (50个多镜头源视频编辑案例), X2MV (20个组合交互轨迹)。训练数据包含 100 万个内部多镜头视频及公开数据集。
+  - **对比对象 (Baseline)**: MultiShotMaster, LongLive, Infinity-RoPE, ShotStream。
+  - **测试环境**: 单张 H200 GPU。
+- **评价指标**: 
+  - **视频质量**: 文本对齐 (TA, ViCLIP)、美学质量 (AQ)、运动平滑度 (MS)、动态程度 (DD) (来自 VBench)。
+  - **一致性**: 镜头内主体/背景相似度 (DINO/CLIP)，镜头间一致性 (Inter-Shot, ViCLIP)。
+  - **任务完成度 (TF)**: Gemini 2.5 Pro 打分 (1-5)。
+  - **效率**: FPS。
+- **主要结果**: 
+  - 在 T2MV 任务中，ContextMaster 在文本对齐 (0.205)、美学质量 (0.565)、动态程度 (0.669)、镜头间一致性 (0.836) 和任务完成度 (4.17) 上均优于所有 Baseline。
+  - 效率方面，达到 16.74 FPS（单卡 H200），与 LongLive (16.55) 和 Infinity-RoPE (16.37) 处于同一水平，远快于 MultiShotMaster (0.19 FPS)，实现了生成质量、任务完成度与推理速度的兼顾。
+  - 用户研究进一步验证了该模型在灵活组合工作流（如交替进行生成和编辑）中的有效性（具体用户研究得分原文未明确列出）。
+
+---
+</script>
+    <script>
+        const rawMdElement = document.getElementById('raw-markdown');
+        if (rawMdElement) {
+            document.getElementById('content').innerHTML = marked.parse(rawMdElement.textContent);
+            if (window.MathJax && window.MathJax.typesetPromise) {
+                window.MathJax.typesetPromise();
+            }
+        }
+    </script>
+</body>
+</html>
