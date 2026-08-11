@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>📄 Paper Report - 2608.01310 - FATE: Frame-Level Audio-Visual Temporal Embedding (FATE：帧级音视频时间嵌入)</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/github-markdown-css/5.2.0/github-markdown.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script>
+        window.MathJax = {
+            tex: { inlineMath: [['$', '$'], ['\(', '\)']], displayMath: [['$$', '$$'], ['\[', '\]']] },
+            options: { skipHtmlTags: ['script', 'style', 'textarea'] }
+        };
+    </script>
+    <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+    <style>
+        .markdown-body { box-sizing: border-box; min-width: 200px; max-width: 980px; margin: 0 auto; padding: 45px; }
+        @media (max-width: 767px) { .markdown-body { padding: 15px; } }
+    </style>
+</head>
+<body class="markdown-body">
+    <a href='../index.html' style='margin-bottom:20px; display:block;'>← 返回主索引</a>
+    <h1>📄 Paper Report - 2608.01310 - FATE: Frame-Level Audio-Visual Temporal Embedding (FATE：帧级音视频时间嵌入)</h1>
+    <div id="content"></div>
+    <script type="text/markdown" id="raw-markdown">### 1. 🔥 [FATE: Frame-Level Audio-Visual Temporal Embedding](https://arxiv.org/abs/2608.01310) (FATE：帧级音视频时间嵌入)
+- **研究机构**: `（原文未明确）`
+- **Arxiv ID**: `2608.01310` | [点击跳转](https://arxiv.org/abs/2608.01310)
+
+**0. 论文标题**
+- **英文标题**: FATE: Frame-Level Audio-Visual Temporal Embedding
+- **中文标题**: FATE：帧级音视频时间嵌入
+- **研究机构**: （原文未明确）
+- **一句话总结**: 抛弃传统多模态模型的全局池化操作，保留帧级特征序列并在物理时间轴上对齐，通过联合对比学习让同一个 Embedding 空间同时具备语义匹配和音视频时间同步判别能力。
+
+**1. 整体逻辑**
+- **研究任务**: 学习同时捕捉语义（what）和时间对齐（when）的音视频联合表示（Embedding）。
+- **研究动机**: 现有的音视频 Embedding 模型（如 CLIP 系列、PE-AV）通过全局池化把序列压成一个向量，丢了时间信息，只能做语义匹配，分不清音视频是否同步；而同步模型（如 Synchformer）只能输出时间偏移量，缺乏语义理解，遇到语义干扰就崩。近期的 Omni LLM 采样率太低且没有可复用的 Embedding。
+- **本质改动**: 不做全局池化（Global Pooling），保留帧级（Frame-level）特征序列，在物理时间轴上对齐音视频特征，直接计算严格对齐帧对的相似度，把时间同步信息直接编码进 Embedding 空间。
+- **技术溯源**: 基于 PE-AV (Perception Encoder Audio-Visual) 双编码器架构，去掉了文本编码器和全局池化头。
+
+**2. 技术拆解**
+- **核心方法**: 
+  1. **帧级特征提取**：双编码器输出序列特征，不进行 [CLS] 池化。
+  2. **时间对齐**：以音频为时间锚点，通过最近邻插值将视频特征下采样到与音频相同的时间步长（因为视频相邻帧冗余，而音频包含瞬态同步线索如打击乐起音，不能重采样破坏）。
+  3. **帧级相似度计算**：计算对齐后帧对的内积均值（相当于相似度矩阵的对角线均值）。如果发生时间偏移，对角线会错位，相似度自然下降，无需额外的预测头。
+- **关键细节**: 
+  - 视频和音频编码器输出维度分别为 $T_v \times D$ 和 $T_a \times D$。
+  - 视频下采样到 $T_a$ 长度，保证两者序列等长，才能做逐帧内积。
+  - 训练时由于保留帧级特征会限制单卡 Batch Size，作者使用跨 GPU all-gather 来扩大对比学习的负样本池，不增加额外显存开销。
+- **训练/优化目标**: 联合优化两个损失：
+  1. **语义对比损失（跨视频）**：标准的 InfoNCE，区分不同视频的音视频对，建立全局语义空间。
+  2. **时间软对比损失（视频内）**：在同一个长视频中滑动窗口截取不同时间偏移的音频片段，用升余弦核（raised-cosine kernel）生成软标签（偏移 0 权重最大，越远越小，符合人类感知阈值），计算交叉熵损失，让模型学会区分微小的时间错位。
+
+**3. 实验结果**
+- **实验设置**: 
+  - **时间跨模态检索**：数据集 AVSync15, VGG-Sync。分 Intra-Video（候选池只有同视频片段，纯考时间判别）和 Inter-Video（加入 50 个干扰视频，考语义+时间）。
+  - **跨模态事件定位**：数据集 AVE。Zero-shot 设置（只在 VGGSound 上训练，不看 AVE 标签）。
+  - **音视频生成评估**：评估 5 个生成模型的视频同步质量，与人类 MOS 打分对比。
+- **评价指标**: R@k, NDCG@k (检索)；Accuracy (事件定位)；Spearman 秩相关系数 (生成评估)。
+- **主要结果**: 
+  - **检索**：Intra-Video 下，FATE 的 R@3 比最强 baseline（Synchformer）高 13 个点以上，同时语义检索高 20 个点。Inter-Video 下，Synchformer 在加入语义干扰后性能崩溃，FATE 依然稳健，证明时间判别需要语义兜底。
+  - **事件定位**：Zero-shot 下达到 48.3% 准确率，超越了在 AVE 上全监督训练的 SOTA 方法（DAM 47.8%）。
+  - **生成评估**：在衡量生成视频同步质量时，FATE 的打分与人类主观判断的 Spearman 相关系数最高，比基于规则、偏移量预测或全局 Embedding 的现有指标都准。
+
+---
+</script>
+    <script>
+        const rawMdElement = document.getElementById('raw-markdown');
+        if (rawMdElement) {
+            document.getElementById('content').innerHTML = marked.parse(rawMdElement.textContent);
+            if (window.MathJax && window.MathJax.typesetPromise) {
+                window.MathJax.typesetPromise();
+            }
+        }
+    </script>
+</body>
+</html>
