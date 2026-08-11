@@ -1,682 +1,829 @@
-import requests
-from bs4 import BeautifulSoup
-import datetime
-from openai import OpenAI
-import os
-import re
-import json
+"""Paper Report: arXiv screening, full-text deep dive, archive pages and Feishu delivery.
+
+The manual deep-dive path uses this reading order when an arXiv HTML page is
+available:
+
+1. Abstract
+2. Experiments / results / evaluation / ablation
+3. Method / approach / architecture / algorithm
+4. Introduction / conclusion / discussion
+5. Other top-level sections
+6. Related work / background
+7. Appendix / acknowledgements / ethics
+
+The selected sections are restored to their original order before being sent
+to the model. The full-text budget is 90,000 characters per paper.
+"""
+
+from __future__ import annotations
+
+import datetime as dt
 import hashlib
 import html
+import json
+import logging
+import os
+import re
+import time
+from dataclasses import dataclass
+from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
+from urllib.parse import urlparse
+from xml.etree import ElementTree as ET
 
-# --- 1. 核心配置 ---
-client_llm = OpenAI(
-    api_key=os.getenv("DASHSCOPE_API_KEY"),
-    base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
+import requests
+from bs4 import BeautifulSoup
+from openai import OpenAI
+
+
+LOGGER = logging.getLogger(__name__)
+FULLTEXT_BUDGET = 90000
+REQUEST_ATTEMPTS = 3
+REQUEST_BACKOFF_SECONDS = 2
+MODEL_NAME = os.getenv("PAPER_REPORT_MODEL", "qwen3.7-plus")
+CATEGORIES = [item.strip() for item in os.getenv("ARXIV_CATEGORIES", "cs.RO").split(",") if item.strip()]
+HEADERS = {
+    "User-Agent": "paper-report/2.0 (+https://github.com/RedBeanCake/paper-report)",
+}
+
+RETRYABLE_STATUS_CODES = {408, 425, 429, 500, 502, 503, 504}
+ARXIV_ID_RE = re.compile(
+    r"(?:arxiv\.org/(?:abs|pdf|html)/|arxiv:)?(\d{4}\.\d{4,5}(?:v\d+)?)",
+    re.IGNORECASE,
 )
-FEISHU_WEBHOOK = os.getenv("FEISHU_WEBHOOK")
+
+# Lower number means higher priority during the 90k-character selection pass.
+SECTION_PRIORITY: Sequence[Tuple[re.Pattern[str], int]] = (
+    (
+        re.compile(r"experiment|result|evaluation|ablation|benchmark|analysis", re.IGNORECASE),
+        0,
+    ),
+    (
+        re.compile(r"method|approach|model|architecture|framework|algorithm|implementation", re.IGNORECASE),
+        1,
+    ),
+    (
+        re.compile(r"introduction|conclusion|discussion|motivation", re.IGNORECASE),
+        2,
+    ),
+    (re.compile(r"related work|background|preliminar", re.IGNORECASE), 4),
+    (re.compile(r"appendix|acknowledg|impact statement|ethic", re.IGNORECASE), 5),
+)
+
+
+class ReportError(RuntimeError):
+    """Raised when a report stage cannot produce a trustworthy result."""
+
+
+@dataclass
+class PaperMetadata:
+    paper_id: str
+    title: str = ""
+    abstract: str = ""
+    authors: str = ""
+    published: str = ""
+
+
+def _env_client() -> OpenAI:
+    api_key = os.getenv("DASHSCOPE_API_KEY")
+    if not api_key:
+        raise ReportError("DASHSCOPE_API_KEY is not configured")
+    return OpenAI(api_key=api_key, base_url="https://dashscope.aliyuncs.com/compatible-mode/v1")
+
+
+client_llm = _env_client()
+FEISHU_WEBHOOK = os.getenv("FEISHU_WEBHOOK", "")
 FEISHU_APP_ID = os.getenv("FEISHU_APP_ID", "")
 FEISHU_APP_SECRET = os.getenv("FEISHU_APP_SECRET", "")
-# 解析完成后，报告正文要推送到的飞书群 chat_id（不填则退回 webhook 卡片）
 TARGET_CHAT_ID = os.getenv("CHAT_ID", "")
+REPO_FULL_NAME = os.getenv("GITHUB_REPOSITORY", "owner/repo")
+REPO_OWNER = os.getenv("GITHUB_REPOSITORY_OWNER", REPO_FULL_NAME.split("/", 1)[0])
+REPO_NAME = REPO_FULL_NAME.split("/")[-1]
+GITHUB_PAGES_URL = os.getenv(
+    "GITHUB_PAGES_URL", f"https://{REPO_OWNER}.github.io/{REPO_NAME}/"
+)
 
-repo_full_name = os.getenv('GITHUB_REPOSITORY', 'owner/repo')
-repo_owner = os.getenv('GITHUB_REPOSITORY_OWNER', 'owner')
-repo_name = repo_full_name.split('/')[-1]
-# 这里的 URL 会根据你的新仓库名自动变化
-GITHUB_PAGES_URL = f"https://{repo_owner}.github.io/{repo_name}/"
-
-CATEGORIES = ['cs.RO']
-
-HEADERS = {'User-Agent': 'Mozilla/5.0'}
-
-# 飞书 API
-FEISHU_TENANT_TOKEN = {"token": None, "expire": 0}
+FILTER_WARNINGS: List[str] = []
+FEISHU_TENANT_TOKEN: Dict[str, Any] = {"token": None, "expire": 0.0}
 
 
-def get_feishu_tenant_token():
-    """获取飞书自建应用的 tenant_access_token（带缓存）"""
-    if not (FEISHU_APP_ID and FEISHU_APP_SECRET):
-        return None
-    if FEISHU_TENANT_TOKEN["token"] and datetime.datetime.now().timestamp() < FEISHU_TENANT_TOKEN["expire"] - 60:
-        return FEISHU_TENANT_TOKEN["token"]
-    try:
-        res = requests.post("https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal",
-                            json={"app_id": FEISHU_APP_ID, "app_secret": FEISHU_APP_SECRET}, timeout=10)
-        data = res.json()
-        token = data.get("tenant_access_token")
-        if token:
-            FEISHU_TENANT_TOKEN["token"] = token
-            FEISHU_TENANT_TOKEN["expire"] = datetime.datetime.now().timestamp() + int(data.get("expire", 7200))
-        return token
-    except Exception as e:
-        print(f"获取飞书 token 失败: {e}")
-        return None
-
-
-def _md_to_feishu_card(content_md, title=None, paper_url=None):
-    """把 Qwen 生成的 Markdown 报告转成飞书卡片元素列表，渲染效果尽量好。"""
-    elements = []
-
-    # 标题行下方加一行论文链接（如果有）
-    if paper_url:
-        elements.append({"tag": "div", "text": {"tag": "lark_md", "content": f"📎 [查看原文]({paper_url})"}})
-        elements.append({"tag": "hr"})
-
-    lines = content_md.split("\n")
-    buffer = []
-
-    def flush():
-        """把当前 buffer 里的文本行合并成一个 lark_md div"""
-        if not buffer:
-            return
-        text = "\n".join(buffer)
-        if text.strip():
-            elements.append({"tag": "div", "text": {"tag": "lark_md", "content": text}})
-        buffer.clear()
-
-    for line in lines:
-        stripped = line.strip()
-
-        # 分隔线 → 卡片分隔线
-        if stripped in ("---", "***", "___"):
-            flush()
-            elements.append({"tag": "hr"})
-            continue
-
-        # 章节标题（### / #### / **X. ...**）
-        if re.match(r'^#{1,4}\s', stripped) or re.match(r'^\*\*\d+\.', stripped):
-            flush()
-            # 转为粗体，飞书 lark_md 支持
-            heading = re.sub(r'^#{1,4}\s*', '', stripped)
-            # 去掉多余的 ** 包裹
-            heading = re.sub(r'^\*\*(.+?)\*\*', r'\1', heading)
-            elements.append({"tag": "div", "text": {"tag": "lark_md", "content": f"**{heading}**"}})
-            continue
-
-        # 列表项 "- **key**: value" → "• **key**：value"
-        m = re.match(r'^[-*]\s+\*\*(.+?)\*\*[:：]\s*(.*)', stripped)
-        if m:
-            flush()
-            key, val = m.group(1), m.group(2)
-            if val:
-                elements.append({"tag": "div", "text": {"tag": "lark_md", "content": f"• **{key}**：{val}"}})
+def _request(
+    method: str,
+    url: str,
+    *,
+    timeout: float = 20,
+    headers: Optional[Dict[str, str]] = None,
+    **kwargs: Any,
+) -> requests.Response:
+    last_error: Optional[BaseException] = None
+    for attempt in range(REQUEST_ATTEMPTS):
+        try:
+            response = requests.request(
+                method,
+                url,
+                headers=headers or HEADERS,
+                timeout=timeout,
+                **kwargs,
+            )
+            if response.status_code in RETRYABLE_STATUS_CODES:
+                last_error = ReportError(f"HTTP {response.status_code}: {url}")
+                if attempt < REQUEST_ATTEMPTS - 1:
+                    time.sleep(REQUEST_BACKOFF_SECONDS**attempt)
+                    continue
             else:
-                # 没有值的 key（说明内容在下面的子列表里）
-                buffer.append(f"**{key}：**")
+                response.raise_for_status()
+                return response
+        except requests.RequestException as exc:
+            last_error = exc
+            if attempt < REQUEST_ATTEMPTS - 1:
+                time.sleep(REQUEST_BACKOFF_SECONDS**attempt)
+                continue
+    raise ReportError(f"request failed after {REQUEST_ATTEMPTS} attempts: {url}") from last_error
+
+
+def _llm(prompt: str, *, response_format: Optional[Dict[str, str]] = None) -> str:
+    last_error: Optional[BaseException] = None
+    for attempt in range(REQUEST_ATTEMPTS):
+        try:
+            kwargs: Dict[str, Any] = {
+                "model": MODEL_NAME,
+                "messages": [{"role": "user", "content": prompt}],
+            }
+            if response_format:
+                kwargs["response_format"] = response_format
+            completion = client_llm.chat.completions.create(**kwargs)
+            content = completion.choices[0].message.content
+            if content:
+                return content
+            raise ReportError("LLM returned empty content")
+        except Exception as exc:
+            last_error = exc
+            LOGGER.warning("LLM attempt %s/%s failed: %s", attempt + 1, REQUEST_ATTEMPTS, exc)
+            if attempt < REQUEST_ATTEMPTS - 1:
+                time.sleep(REQUEST_BACKOFF_SECONDS**attempt)
+    raise ReportError("LLM call failed after retries") from last_error
+
+
+def extract_arxiv_id(text: str) -> Optional[str]:
+    match = ARXIV_ID_RE.search(text)
+    return match.group(1).split("v", 1)[0] if match else None
+
+
+def parse_input_items(raw: str) -> List[Dict[str, str]]:
+    items: List[Dict[str, str]] = []
+    for token in re.split(r"[\n,，;；\s]+", raw.strip()):
+        if not token:
             continue
-
-        # 普通列表项 "- xxx" → "• xxx"
-        m2 = re.match(r'^[-*]\s+(.*)', stripped)
-        if m2 and not stripped.startswith("- **"):
-            flush()
-            elements.append({"tag": "div", "text": {"tag": "lark_md", "content": f"• {m2.group(1)}"}})
-            continue
-
-        # 普通文本（含带 ** 的）
-        if stripped:
-            buffer.append(stripped)
-
-    flush()
-    return elements
+        if token.startswith(("http://", "https://")):
+            paper_id = extract_arxiv_id(token) if "arxiv.org" in token.lower() else None
+            if paper_id:
+                items.append({"id": paper_id})
+            else:
+                slug = hashlib.sha256(token.encode("utf-8")).hexdigest()[:10]
+                items.append({"url": token, "slug": slug})
+        else:
+            paper_id = extract_arxiv_id(token)
+            if paper_id:
+                items.append({"id": paper_id})
+    return items
 
 
-def send_feishu_markdown_to_chat(content_md, title=None, paper_url=None):
-    """把 Markdown 报告转成飞书卡片发送到指定群（走应用机器人 API）"""
-    if not (TARGET_CHAT_ID and get_feishu_tenant_token()):
-        return False
+def _section_priority(heading: str) -> int:
+    for pattern, priority in SECTION_PRIORITY:
+        if pattern.search(heading):
+            return priority
+    return 3
 
-    card_elements = _md_to_feishu_card(content_md, title=title, paper_url=paper_url)
 
-    card = {
-        "header": {
-            "title": {"tag": "plain_text", "content": title or "📄 论文深度解析"},
-            "template": "blue"
-        },
-        "elements": card_elements if card_elements else [{"tag": "div", "text": {"tag": "lark_md", "content": content_md[:20000]}}]
-    }
+def _clean_text(value: str) -> str:
+    return re.sub(r"\s+", " ", value or "").strip()
 
+
+def _strip_arxiv_version(paper_id: str) -> str:
+    return paper_id.split("v", 1)[0]
+
+
+def get_arxiv_metadata(paper_id: str) -> PaperMetadata:
+    """Fetch authoritative title/abstract metadata from arXiv Atom API."""
+
+    normalized_id = _strip_arxiv_version(paper_id)
+    response = _request(
+        "GET",
+        "https://export.arxiv.org/api/query",
+        timeout=15,
+        params={"id_list": normalized_id},
+    )
     try:
-        res = requests.post(
-            f"https://open.feishu.cn/open-apis/im/v1/messages?receive_id_type=chat_id",
-            headers={"Authorization": f"Bearer {get_feishu_tenant_token()}"},
-            json={"receive_id": TARGET_CHAT_ID, "msg_type": "interactive", "content": json.dumps(card, ensure_ascii=False)},
-            timeout=15)
-        print(f"飞书应用消息发送结果: {res.status_code} {res.text[:200]}")
-        return res.status_code == 200
-    except Exception as e:
-        print(f"飞书应用消息发送失败: {e}")
-        return False
+        root = ET.fromstring(response.text)
+    except ET.ParseError as exc:
+        raise ReportError(f"invalid arXiv metadata XML for {normalized_id}") from exc
+
+    entry = next((node for node in root.iter() if node.tag.endswith("entry")), None)
+    if entry is None:
+        return PaperMetadata(normalized_id)
+
+    title = ""
+    abstract = ""
+    authors: List[str] = []
+    published = ""
+    for child in entry:
+        if child.tag.endswith("title") and child.text:
+            title = _clean_text(child.text)
+        elif child.tag.endswith("summary") and child.text:
+            abstract = _clean_text(child.text)
+        elif child.tag.endswith("published") and child.text:
+            published = _clean_text(child.text)
+        elif child.tag.endswith("author"):
+            name = next((n.text for n in child if n.tag.endswith("name") and n.text), "")
+            if name:
+                authors.append(_clean_text(name))
+    return PaperMetadata(normalized_id, title, abstract, ", ".join(authors), published)
 
 
-def send_feishu_webhook(text):
-    """发送纯文本到飞书（webhook 方式，兼容旧配置）"""
-    if not FEISHU_WEBHOOK:
-        return
-    try:
-        requests.post(FEISHU_WEBHOOK, json={"msg_type": "text", "content": {"text": text}}, timeout=10)
-    except Exception as e:
-        print(f"飞书 webhook 发送失败: {e}")
+def scrape_arxiv(category: str) -> Tuple[Optional[Dict[str, str]], int, List[Dict[str, str]]]:
+    """Fetch recent arXiv papers for the screening workflow."""
 
-
-def send_feishu_card_via_webhook(card):
-    """通过 webhook 发送卡片（应用机器人不可用时的回退方案）"""
-    if not FEISHU_WEBHOOK:
-        return False
-    try:
-        res = requests.post(FEISHU_WEBHOOK, json={"msg_type": "interactive", "card": card}, timeout=15)
-        print(f"飞书 webhook 卡片发送结果: {res.status_code} {res.text[:200]}")
-        return res.status_code == 200
-    except Exception as e:
-        print(f"飞书 webhook 卡片发送失败: {e}")
-        return False
-
-
-# --- 2. arXiv 抓取 ---
-def scrape_arxiv(category):
-    """抓取 Arxiv 数据，并提取日期前缀和总论文数（仅定时初筛模式用）"""
     url = f"https://arxiv.org/list/{category}/recent?show=500"
     try:
-        res = requests.get(url, headers=HEADERS, timeout=15)
-        soup = BeautifulSoup(res.text, 'html.parser')
-        dls = soup.find_all('dl', id='articles')
-        if not dls: return None, 0, []
+        soup = BeautifulSoup(_request("GET", url, timeout=20).text, "html.parser")
+        article_list = soup.find("dl", id="articles")
+        if not article_list:
+            raise ReportError("arXiv page has no article list")
 
-        raw_date_str = soup.find_all('h3')[0].text.strip()
-        match = re.search(r'^(.*)\(showing \d+ of (\d+) entries', raw_date_str)
-        if match:
-            date_prefix = match.group(1).strip()
-            total_entries = match.group(2)
-        else:
-            date_prefix = raw_date_str
-            total_entries = "0"
+        headings = soup.find_all("h3")
+        raw_date = _clean_text(headings[0].get_text(" ", strip=True)) if headings else ""
+        match = re.search(r"^(.*)\(showing \d+ of (\d+) entries", raw_date)
+        date_prefix = match.group(1).strip() if match else raw_date
+        total_entries = match.group(2) if match else "0"
 
-        papers = []
-        dt_tags = dls[0].find_all('dt')
-        dd_tags = dls[0].find_all('dd')
-
-        for dt, dd in zip(dt_tags, dd_tags):
-            link_tag = dt.find('a', title='Abstract')
-            if not link_tag: continue
-            id_str = link_tag.text.replace('arXiv:', '').strip()
-            title = dd.find('div', class_='list-title').text.replace('Title:', '').strip()
-            abstract = dd.find('p', class_='mathjax').text.strip() if dd.find('p', class_='mathjax') else ""
-            papers.append({"id": id_str, "title": title, "abstract": abstract[:1000]})
-
+        papers: List[Dict[str, str]] = []
+        for dt_tag, dd_tag in zip(article_list.find_all("dt"), article_list.find_all("dd")):
+            link = dt_tag.find("a", title="Abstract")
+            title_tag = dd_tag.find("div", class_="list-title")
+            abstract_tag = dd_tag.find("p", class_="mathjax")
+            if not link or not title_tag:
+                continue
+            paper_id = link.get_text(strip=True).replace("arXiv:", "")
+            papers.append(
+                {
+                    "id": paper_id,
+                    "title": _clean_text(title_tag.get_text(" ", strip=True).replace("Title:", "")),
+                    "abstract": _clean_text(abstract_tag.get_text(" ", strip=True))[:4000]
+                    if abstract_tag
+                    else "",
+                }
+            )
         return {"prefix": date_prefix, "total": total_entries}, len(papers), papers
-    except Exception:
+    except Exception as exc:
+        warning = f"⚠️ 抓取/解析 arXiv {category} 失败：{type(exc).__name__}: {exc}"
+        FILTER_WARNINGS.append(warning)
+        LOGGER.exception(warning)
         return None, 0, []
 
 
-ARXIV_ID_RE = re.compile(r'(?:arxiv\.org/(?:abs|pdf|html)/|arxiv:)?(\d{4}\.\d{4,5}(?:v\d+)?)', re.I)
+def get_arxiv_full_text(paper_id: str) -> Optional[str]:
+    """Fetch arXiv HTML and select up to 90k chars by section priority.
 
+    Sections are ranked for selection, but the final concatenation follows the
+    paper's original document order. This keeps the model's reading order
+    natural while protecting the method and experiment sections from a hard
+    tail truncation.
+    """
 
-def extract_arxiv_id(text):
-    """从一段文本里提取第一个 arxiv ID"""
-    m = ARXIV_ID_RE.search(text)
-    return m.group(1).split('v')[0] if m else None
-
-
-def get_arxiv_full_text(paper_id):
-    """抓取 Arxiv HTML 正文，剔除参考文献以节省 token"""
-    url = f"https://arxiv.org/html/{paper_id}"
+    normalized_id = _strip_arxiv_version(paper_id)
     try:
-        res = requests.get(url, headers=HEADERS, timeout=30)
-        if res.status_code != 200: return None
-        soup = BeautifulSoup(res.text, 'html.parser')
-
-        for script in soup(["script", "style"]):
-            script.decompose()
-
-        ref_tags = soup.find_all(['section', 'div'], class_=re.compile(r'bibliography|references', re.I))
-        ref_tags += soup.find_all(['section', 'div'], id=re.compile(r'bib|references', re.I))
-        for tag in ref_tags:
+        soup = BeautifulSoup(
+            _request("GET", f"https://arxiv.org/html/{normalized_id}", timeout=30).text,
+            "html.parser",
+        )
+        for tag in soup(["script", "style", "noscript"]):
             tag.decompose()
-            print(f"[{paper_id}] 已剔除参考文献部分")
 
-        return soup.get_text()[:30000]
-    except Exception as e:
-        print(f"抓取全文出错 {paper_id}: {e}")
+        references = soup.find_all(
+            ["section", "div"], class_=re.compile(r"bibliography|references", re.IGNORECASE)
+        )
+        references += soup.find_all(
+            ["section", "div"], id=re.compile(r"bib|references", re.IGNORECASE)
+        )
+        for tag in references:
+            tag.decompose()
+
+        parts: List[Tuple[str, int, str]] = []
+        abstract = soup.find("div", class_=re.compile(r"ltx_abstract", re.IGNORECASE))
+        if abstract:
+            parts.append(("ABSTRACT", 0, _clean_text(abstract.get_text(" ", strip=True))))
+
+        sections = [section for section in soup.find_all("section") if section.find_parent("section") is None]
+        for section in sections:
+            heading_tag = section.find(["h1", "h2", "h3", "h4"])
+            heading = _clean_text(heading_tag.get_text(" ", strip=True)) if heading_tag else "(untitled)"
+            text = _clean_text(section.get_text(" ", strip=True))
+            if text:
+                parts.append((heading, _section_priority(heading), text))
+
+        if not parts:
+            body = _clean_text(soup.get_text(" ", strip=True))
+            return body[:FULLTEXT_BUDGET] or None
+
+        ranked_indices = sorted(range(len(parts)), key=lambda index: (parts[index][1], index))
+        kept: set[int] = set()
+        used = 0
+        dropped: List[str] = []
+        for index in ranked_indices:
+            heading, _, text = parts[index]
+            if used + len(text) <= FULLTEXT_BUDGET:
+                kept.add(index)
+                used += len(text)
+            else:
+                dropped.append(heading)
+
+        if dropped:
+            LOGGER.info("[%s] dropped low-priority sections: %s", normalized_id, ", ".join(dropped[:8]))
+        chunks = [f"## {parts[index][0]}\n{parts[index][2]}" for index in range(len(parts)) if index in kept]
+        return "\n\n".join(chunks) or None
+    except Exception as exc:
+        LOGGER.warning("full-text fetch failed for %s: %s", normalized_id, exc)
         return None
 
 
-def get_arxiv_abstract(paper_id):
-    """抓取 Arxiv 摘要页（HTML 全文不存在时兜底）"""
+def get_webpage_text(url: str) -> Tuple[Optional[str], Optional[str]]:
+    """Extract readable title and body from a non-arXiv webpage."""
+
+    parsed = urlparse(url)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        return None, None
     try:
-        res_abs = requests.get(f"https://arxiv.org/abs/{paper_id}", headers=HEADERS, timeout=15)
-        if res_abs.status_code == 200:
-            abs_soup = BeautifulSoup(res_abs.text, 'html.parser')
-            abstract = abs_soup.find('blockquote', class_='abstract')
-            if abstract:
-                return abstract.text
-        return None
-    except Exception:
-        return None
-
-
-def get_webpage_text(url):
-    """抓取任意网页正文（blog / technical report 等），返回 (标题, 正文)"""
-    try:
-        res = requests.get(url, headers=HEADERS, timeout=30)
-        if res.status_code != 200:
-            print(f"网页抓取失败 {url}: HTTP {res.status_code}")
-            return None, None
-        soup = BeautifulSoup(res.text, 'html.parser')
-        title = soup.title.string.strip() if soup.title and soup.title.string else url
-
-        # 优先取 <article> / <main>，否则取 body
-        body = soup.find('article') or soup.find('main') or soup.body or soup
+        soup = BeautifulSoup(_request("GET", url, timeout=30).text, "html.parser")
+        title = _clean_text(soup.title.get_text(" ", strip=True)) if soup.title else url
+        body = soup.find("article") or soup.find("main") or soup.body or soup
         for tag in body(["script", "style", "nav", "header", "footer", "aside", "form"]):
             tag.decompose()
-        text = re.sub(r'\n{3,}', '\n\n', body.get_text('\n'))
-        text = re.sub(r'[ \t]{2,}', ' ', text)
-        return title, text[:30000]
-    except Exception as e:
-        print(f"网页抓取失败 {url}: {e}")
+        text = re.sub(r"\n{3,}", "\n\n", body.get_text("\n", strip=True))
+        text = re.sub(r"[ \t]{2,}", " ", text)
+        return title or url, text[:FULLTEXT_BUDGET] or None
+    except Exception as exc:
+        LOGGER.warning("webpage fetch failed for %s: %s", url, exc)
         return None, None
 
 
-# --- 3. 深度解析 ---
-def build_expert_prompt(paper_id, full_text, source_label=""):
-    """构造深度解析提示词"""
-    source_hint = f"\n\n**解析对象**: {source_label}" if source_label else ""
+def _title_hint(metadata: PaperMetadata) -> str:
+    if metadata.title:
+        return f"""
+【可信论文元数据】
+英文原文标题：{metadata.title}
+论文摘要：{metadata.abstract or "（摘要未提供）"}
+
+标题规则：
+- “英文标题”字段必须逐字复制上面的英文原文标题。
+- 不要把关键词、方法名或主题概括当成论文标题。
+- 不要输出“原文未提供完整标题”，因为标题已经由 arXiv 元数据提供。
+"""
+    return """
+【标题规则】
+可信标题元数据不可用。英文标题必须写“标题元数据不可用”，不要根据关键词猜测标题。
+"""
+
+
+def build_expert_prompt(
+    paper_id: str,
+    full_text: Optional[str],
+    *,
+    metadata: Optional[PaperMetadata] = None,
+    source_label: str = "",
+    text_kind: str = "按章节优先级裁剪的正文",
+) -> str:
+    metadata = metadata or PaperMetadata(paper_id)
+    source_hint = f"\n解析对象：{source_label}" if source_label else ""
+    content = full_text or "（全文与摘要均不可用；所有无法确认的字段写‘原文未提及’，不要猜测。）"
     return f"""
-    Role: 你是一位资深的AI/计算机科学研究员，能快速读懂任意方向的论文或技术文章。请用平实、地道的中文做高信息密度的总结。
-    Task: 像在组会上给同事分享一样，直接讲清楚这篇工作做了什么、改了哪里、效果如何。严禁过度修饰，严禁使用炫技式的词汇。先判断文章的领域和类型（方法创新/理论分析/系统工程/数据集/综述等），再用该领域的行话来讲。
-    {source_hint}
+Role: 你是一位资深的 AI/计算机科学研究员，能快速读懂论文或技术文章。
+Task: 用平实、地道的中文做高信息密度总结，直接讲清楚工作做了什么、改了哪里、效果如何。
+{source_hint}
 
-    重要原则：
-    - 以下结构是通用模板。若某个字段不适用于本文（例如理论论文没有"数据集"、系统论文没有"损失函数"），直接省略该字段，不要强行编造或留空。
-    - 只写文中确实支撑得起的内容。无法从原文确认的细节，标注"（原文未明确）"，严禁猜测或脑补。
+{_title_hint(metadata)}
 
-    请按以下结构输出（使用 Markdown）：
+输入说明：下方内容是{ text_kind }。低优先级章节可能已被删除。
+只允许依据实际输入作答。找不到依据的字段写“原文未提及”，严禁猜测，尤其是数据集、baseline、超参数和具体实验数值。
 
-    **0. 论文标题**
-    - **英文标题**: [论文原文标题]
-    - **中文标题**: [精准的中文翻译]
-    - **研究机构**: [作者所属的主要单位，如 DeepMind、Stanford University 等]
-    - **一句话总结**: [用一句话讲清这篇工作最核心的贡献，让人扫一眼就知道要不要细看]
+请严格按以下结构输出 Markdown，字段名和层级不要改变：
 
-    **1. 整体逻辑**
-    - **研究任务**: [论文要解决的任务是什么，如：根据文本生成图像 / 加速大模型推理 / 构建某类基准]
-    - **研究动机**: [发现了什么问题需要改进，或现有方法有什么不足]
-    - **本质改动**: [这篇工作最核心的思路改动，一句话点破它和前人不一样在哪]
-    - **技术溯源**: [基于哪些已有工作或开源基座？如 CLIP / OpenVLA / Llama3 / Transformer 等]
+**0. 论文标题**
+- **英文标题**: [逐字复制可信元数据标题]
+- **中文标题**: [精准中文翻译]
+- **研究机构**: [作者所属的主要单位；无法确认则写原文未提及]
+- **一句话总结**: [核心贡献]
 
-    **2. 技术拆解**
-    - **核心方法**: [本质改动对应的具体方法、算法或系统设计]
-    - **关键细节**: [输入输出、模型结构或系统架构、规模、关键超参等]
-    - **训练/优化目标**: [主要的损失函数或优化目标；若非学习类工作，说明关键算法或核心机制]
+**1. 整体逻辑**
+- **研究任务**: ...
+- **研究动机**: ...
+- **本质改动**: ...
+- **技术溯源**: ...
 
-    **3. 实验结果**
-    - **实验设置**: [用的数据集与对比对象（baseline）；系统类工作则说明测试环境与负载]
-    - **评价指标**: [用什么指标衡量、怎么评价]
-    - **主要结果**: [比 baseline 好多少，或验证了什么结论]
+**2. 技术拆解**
+- **核心方法**: ...
+- **关键细节**: ...
+- **训练/优化目标**: ...
 
-    待处理全文内容：
-    {full_text if full_text else "（全文抓取失败，仅能基于摘要分析。无法确认的技术细节请标注'（摘要未提及）'，不要猜测。）"}
-    """
+**3. 实验结果**
+- **实验设置**: ...
+- **评价指标**: ...
+- **主要结果**: ...
+
+待处理内容（{text_kind}）：
+{content}
+"""
 
 
-def deep_dive_paper(item, idx):
-    """
-    对单个条目做深度解析。
-    item: {"id": arxiv_id 或 "url": 任意链接}
-    返回 dict（失败返回 None）
-    """
+def _extract_field(report: str, label: str) -> str:
+    pattern = rf"(?:\*\*)?{re.escape(label)}(?:\*\*)?\s*[:：]\s*(.+)"
+    match = re.search(pattern, report, re.IGNORECASE)
+    return _clean_text(match.group(1)) if match else ""
+
+
+def _safe_title(value: str, fallback: str) -> str:
+    cleaned = _clean_text(value)
+    if not cleaned or cleaned.startswith(("原文未", "标题元数据不可用")):
+        return fallback
+    return cleaned
+
+
+def deep_dive_paper(item: Dict[str, str], index: int) -> Optional[Dict[str, str]]:
+    """Deep-read one arXiv paper or arbitrary URL and return archive data."""
+
     if item.get("url"):
-        # --- 任意 URL（blog / technical report）---
         url = item["url"]
-        slug = item.get("slug", "")
-        print(f"正在进行 URL 深度解析: {url}...")
-        title, full_text = get_webpage_text(url)
-        if not full_text:
-            full_text = None
-        report = None
-        try:
-            completion = client_llm.chat.completions.create(
-                model="qwen3.7-plus",
-                messages=[{"role": "user", "content": build_expert_prompt("", full_text, source_label=url)}]
+        title, body = get_webpage_text(url)
+        if not body:
+            raise ReportError(f"could not fetch readable body: {url}")
+        report = _llm(
+            build_expert_prompt(
+                "",
+                body,
+                source_label=url,
+                text_kind="网页正文",
             )
-            report = completion.choices[0].message.content
-        except Exception as e:
-            print(f"深度解析出错 {url}: {e}")
-            return None
-
-        t_en = title or url
-        t_zh = ""
-        # 渲染 Markdown
-        md = f"### {idx}. 🔥 [{t_en}]({url})\n"
-        md += f"- **来源链接**: `{url}`\n\n"
-        md += f"{report}\n\n"
-        md += "---\n"
+        )
+        english_title = _safe_title(_extract_field(report, "英文标题"), title or url)
+        chinese_title = _extract_field(report, "中文标题")
+        markdown = (
+            f"### {index}. [{english_title}]({url})\n"
+            f"- **来源链接**: `{url}`\n\n{report}\n\n---\n"
+        )
         return {
-            "slug": slug, "md": md, "title": title or url,
-            "report": report, "source_url": url, "kind": "url",
+            "slug": item.get("slug", hashlib.sha256(url.encode()).hexdigest()[:10]),
+            "title": english_title,
+            "title_zh": chinese_title,
+            "report": report,
+            "markdown": markdown,
+            "source_url": url,
+            "kind": "url",
         }
 
-    # --- arXiv 论文 ---
-    paper_id = item["id"]
-    print(f"正在进行全文深度解析: {paper_id}...")
+    paper_id = _strip_arxiv_version(item["id"])
+    metadata = get_arxiv_metadata(paper_id)
     full_text = get_arxiv_full_text(paper_id)
+    text_kind = "按章节优先级裁剪的全文" if full_text else "arXiv 摘要"
     if not full_text:
-        print(f"HTML 全文暂未生成，尝试抓取摘要页...")
-        full_text = get_arxiv_abstract(paper_id)
-
-    try:
-        completion = client_llm.chat.completions.create(
-            model="qwen3.7-plus",
-            messages=[{"role": "user", "content": build_expert_prompt(paper_id, full_text)}]
+        full_text = metadata.abstract
+    report = _llm(
+        build_expert_prompt(
+            paper_id,
+            full_text,
+            metadata=metadata,
+            text_kind=text_kind,
         )
-        report = completion.choices[0].message.content
-    except Exception as e:
-        print(f"深度解析出错 {paper_id}: {e}")
-        return None
+    )
 
-    # --- 提取逻辑 ---
-    title_en = re.search(r"英文标题\*\*: (.*)", report)
-    title_zh = re.search(r"中文标题\*\*: (.*)", report)
-    affiliation = re.search(r"研究机构\*\*: (.*)", report)
-    t_en = title_en.group(1).strip() if title_en else f"Arxiv: {paper_id}"
-    t_zh = title_zh.group(1).strip() if title_zh else ""
-    aff = affiliation.group(1).strip() if affiliation else "未知机构"
-
-    # --- 渲染 Markdown ---
-    md = f"### {idx}. 🔥 [{t_en}](https://arxiv.org/abs/{paper_id}) ({t_zh})\n"
-    md += f"- **研究机构**: `{aff}`\n"
-    md += f"- **Arxiv ID**: `{paper_id}` | [点击跳转](https://arxiv.org/abs/{paper_id})\n\n"
-    md += f"{report}\n\n"
-    md += "---\n"
-
+    # The outer title is always metadata-first. Model title output is only a fallback.
+    model_title = _extract_field(report, "英文标题")
+    english_title = _safe_title(model_title, metadata.title or f"arXiv: {paper_id}")
+    if metadata.title:
+        english_title = metadata.title
+    chinese_title = _extract_field(report, "中文标题")
+    affiliation = _extract_field(report, "研究机构") or "原文未提及"
+    markdown = (
+        f"### {index}. 🔥 [{english_title}](https://arxiv.org/abs/{paper_id})"
+        f" ({chinese_title})\n"
+        f"- **研究机构**: `{affiliation}`\n"
+        f"- **ArXiv ID**: `{paper_id}` | [点击跳转](https://arxiv.org/abs/{paper_id})\n\n"
+        f"{report}\n\n---\n"
+    )
     return {
-        "slug": paper_id, "md": md, "title": t_en, "title_zh": t_zh,
-        "affiliation": aff, "report": report, "paper_id": paper_id, "kind": "arxiv",
+        "slug": paper_id,
+        "title": english_title,
+        "title_zh": chinese_title,
+        "report": report,
+        "markdown": markdown,
+        "source_url": f"https://arxiv.org/abs/{paper_id}",
+        "paper_id": paper_id,
+        "kind": "arxiv",
     }
 
 
-def generate_single_page(entry):
-    """为单个解析结果生成独立归档页 archive/{slug}.html"""
-    os.makedirs('archive', exist_ok=True)
-    slug = entry["slug"]
-    safe_slug = re.sub(r'[^\w.-]', '_', slug)
-    file_path = f"archive/{safe_slug}.html"
+def _safe_script_json(value: str) -> str:
+    return (
+        json.dumps(value, ensure_ascii=False)
+        .replace("<", "\\u003c")
+        .replace(">", "\\u003e")
+        .replace("&", "\\u0026")
+    )
+
+
+def _render_page(title: str, body_markdown: str, *, back_link: bool) -> str:
+    safe_title = html.escape(title, quote=True)
+    safe_body = _safe_script_json(body_markdown)
+    back = '<a href="../index.html">&#8592; 返回主索引</a>' if back_link else ""
+    return f"""<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{safe_title}</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/github-markdown-css/5.2.0/github-markdown.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js" defer></script>
+  <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js" defer></script>
+  <style>.markdown-body {{ box-sizing: border-box; max-width: 980px; margin: 0 auto; padding: 30px; }} @media (max-width: 767px) {{ .markdown-body {{ padding: 15px; }} }}</style>
+</head>
+<body class="markdown-body">
+  {back}
+  <h1>{safe_title}</h1>
+  <div id="content"></div>
+  <script type="application/json" id="raw-markdown">{safe_body}</script>
+  <script>
+    window.addEventListener("DOMContentLoaded", function () {{
+      const markdown = JSON.parse(document.getElementById("raw-markdown").textContent);
+      const target = document.getElementById("content");
+      if (!window.marked || !window.DOMPurify) {{ target.textContent = markdown; return; }}
+      target.innerHTML = DOMPurify.sanitize(marked.parse(markdown));
+    }});
+  </script>
+</body>
+</html>
+"""
+
+
+def generate_single_page(entry: Dict[str, str], output_dir: str = ".") -> str:
+    archive_dir = os.path.join(output_dir, "archive")
+    os.makedirs(archive_dir, exist_ok=True)
+    safe_slug = re.sub(r"[^\w.-]", "_", entry["slug"])
+    path = os.path.join(archive_dir, f"{safe_slug}.html")
     title = entry["title"]
     if entry.get("title_zh"):
         title = f"{title} ({entry['title_zh']})"
     if entry.get("paper_id"):
-        title = f"📄 Paper Report - {entry['paper_id']} - {title}"
+        title = f"Paper Report - {entry['paper_id']} - {title}"
+    with open(path, "w", encoding="utf-8") as file:
+        file.write(_render_page(title, entry["markdown"], back_link=True))
 
-    # 全文 markdown（页面标题 = 解析标题；md 内容 = 报告正文）
-    body_content = entry["md"]
-    back_link = "<a href='../index.html' style='margin-bottom:20px; display:block;'>← 返回主索引</a>"
-    safe_body = body_content.replace('</script>', '<\\/script>')
-    safe_title = html.escape(title)
-
-    page_html = f"""<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{safe_title}</title>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/github-markdown-css/5.2.0/github-markdown.min.css">
-    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
-    <script>
-        window.MathJax = {{
-            tex: {{ inlineMath: [['$', '$'], ['\\(', '\\)']], displayMath: [['$$', '$$'], ['\\[', '\\]']] }},
-            options: {{ skipHtmlTags: ['script', 'style', 'textarea'] }}
-        }};
-    </script>
-    <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
-    <style>
-        .markdown-body {{ box-sizing: border-box; min-width: 200px; max-width: 980px; margin: 0 auto; padding: 45px; }}
-        @media (max-width: 767px) {{ .markdown-body {{ padding: 15px; }} }}
-    </style>
-</head>
-<body class="markdown-body">
-    {back_link}
-    <h1>{safe_title}</h1>
-    <div id="content"></div>
-    <script type="text/markdown" id="raw-markdown">{safe_body}</script>
-    <script>
-        const rawMdElement = document.getElementById('raw-markdown');
-        if (rawMdElement) {{
-            document.getElementById('content').innerHTML = marked.parse(rawMdElement.textContent);
-            if (window.MathJax && window.MathJax.typesetPromise) {{
-                window.MathJax.typesetPromise();
-            }}
-        }}
-    </script>
-</body>
-</html>
-"""
-    with open(file_path, "w", encoding="utf-8") as f:
-        f.write(page_html)
-
-    # 附加元数据（用于索引排序：统一按解析时间排序，同一次解析的 arxiv 按 ID 大者优先）
-    meta = {
-        "slug": safe_slug, "title": title, "kind": entry.get("kind", "arxiv"),
-        "ts": datetime.datetime.now().strftime("%Y%m%d%H%M%S"),
+    metadata = {
+        "slug": safe_slug,
+        "title": title,
+        "kind": entry.get("kind", "arxiv"),
+        "ts": dt.datetime.now().strftime("%Y%m%d%H%M%S"),
     }
     if entry.get("paper_id"):
-        meta["paper_id"] = entry["paper_id"]
-    with open(f"archive/.meta.{safe_slug}.json", "w", encoding="utf-8") as f:
-        json.dump(meta, f, ensure_ascii=False)
+        metadata["paper_id"] = entry["paper_id"]
+    with open(os.path.join(archive_dir, f".meta.{safe_slug}.json"), "w", encoding="utf-8") as file:
+        json.dump(metadata, file, ensure_ascii=False)
+    return path
 
-    return file_path
 
-
-def rebuild_index():
-    """扫描 archive/ 下的页面和元数据，重建 index.html"""
-    if not os.path.isdir('archive'):
-        os.makedirs('archive', exist_ok=True)
-        return
-    files = [f for f in os.listdir('archive') if f.endswith('.html') and not f.startswith('.')]
-    entries = []
-    for f_name in files:
+def rebuild_index(output_dir: str = ".") -> None:
+    archive_dir = os.path.join(output_dir, "archive")
+    os.makedirs(archive_dir, exist_ok=True)
+    rows: List[Tuple[float, str, str]] = []
+    for filename in os.listdir(archive_dir):
+        if not filename.endswith(".html") or filename.startswith("."):
+            continue
+        path = os.path.join(archive_dir, filename)
+        meta_path = os.path.join(archive_dir, f".meta.{filename[:-5]}.json")
+        title = filename
+        timestamp = os.path.getmtime(path)
         try:
-            meta = None
-            meta_name = f"archive/.meta.{f_name[:-5]}.json"
-            if os.path.exists(meta_name):
-                with open(meta_name, "r", encoding="utf-8") as mf:
-                    meta = json.load(mf)
-            with open(f"archive/{f_name}", "r", encoding="utf-8") as hf:
-                page_soup = BeautifulSoup(hf.read(), 'html.parser')
-                page_title = page_soup.title.string if page_soup.title else f_name
-
-            if meta and meta.get("paper_id"):
-                # arxiv 论文：按解析批次时间 + ID 数字排序（ID 大的排前）
-                m = re.search(r'(\d{4})\.(\d{4,5})', meta.get("paper_id", ""))
-                num = (int(m.group(1)) * 100000 + int(m.group(2))) if m else 0
-                key = (0, int(meta.get("ts", "0")), num)
-            elif meta and meta.get("ts"):
-                key = (0, int(meta["ts"]), 0)
+            if os.path.exists(meta_path):
+                with open(meta_path, "r", encoding="utf-8") as file:
+                    metadata = json.load(file)
+                title = str(metadata.get("title", title))
+                timestamp = float(metadata.get("ts", timestamp))
             else:
-                # 兼容旧文件：按修改时间
-                key = (2, int(os.path.getmtime(f"archive/{f_name}")), 0)
-            entries.append((key, page_title, f_name))
-        except Exception as e:
-            print(f"解析历史文件 {f_name} 出错: {e}")
-            continue
+                with open(path, "r", encoding="utf-8") as file:
+                    soup = BeautifulSoup(file.read(), "html.parser")
+                title = soup.title.get_text(strip=True) if soup.title else filename
+        except Exception as exc:
+            LOGGER.warning("could not index %s: %s", filename, exc)
+        rows.append((timestamp, title, filename))
 
-    entries.sort(key=lambda x: x[0], reverse=True)
-    index_md = "### 📅 解析存档列表\n\n"
-    for _, page_title, f_name in entries:
-        index_md += f"- [{page_title}](archive/{f_name})\n"
-
-    index_html = """<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>📚 Paper Report - 解析存档</title>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/github-markdown-css/5.2.0/github-markdown.min.css">
-    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
-    <style>
-        .markdown-body { box-sizing: border-box; min-width: 200px; max-width: 980px; margin: 0 auto; padding: 45px; }
-        @media (max-width: 767px) { .markdown-body { padding: 15px; } }
-    </style>
-</head>
-<body class="markdown-body">
-    <h1>📚 Paper Report - 解析存档</h1>
-    <div id="content"></div>
-    <script type="text/markdown" id="raw-markdown">%s</script>
-    <script>
-        const rawMdElement = document.getElementById('raw-markdown');
-        if (rawMdElement) { document.getElementById('content').innerHTML = marked.parse(rawMdElement.textContent); }
-    </script>
-</body>
-</html>
-""" % index_md.replace('</script>', '<\\/script>')
-
-    with open("index.html", "w", encoding="utf-8") as f:
-        f.write(index_html)
+    rows.sort(key=lambda row: row[0], reverse=True)
+    markdown = "### 📅 解析存档列表\n\n" + "\n".join(
+        f"- [{title}]({html.escape('archive/' + filename, quote=True)})" for _, title, filename in rows
+    )
+    index_path = os.path.join(output_dir, "index.html")
+    with open(index_path, "w", encoding="utf-8") as file:
+        file.write(_render_page("Paper Report - 解析存档", markdown, back_link=False))
 
 
-def generate_archive_and_index(date_info, arxiv_content):
-    """（保留旧签名，兼容定时模式调用）生成每日聚合页并推送卡片"""
-    vla_count = (arxiv_content or "").count("###")
-    display_title = f"{date_info['prefix']} (VLA: {vla_count} of {date_info['total']} entries)"
-    safe_date_filename = re.sub(r'[^\w\s-]', '', date_info['prefix']).replace(' ', '_')
-    os.makedirs('archive', exist_ok=True)
-    daily_file_path = f"archive/{safe_date_filename}.html"
-
-    paper_ids = re.findall(r'abs/(\d+\.\d+)', arxiv_content)
-    sources_text = "\n".join([f"https://arxiv.org/html/{pid}" for pid in paper_ids])
-
-    def get_html_template(title, body_content, is_index_page=False, sources_block=""):
-        back_link = "<a href='../index.html' style='margin-bottom:20px; display:block;'>← 返回主索引</a>" if not is_index_page else ""
-        safe_body = body_content.replace('</script>', '<\\/script>')
-        return f"""
-        <!DOCTYPE html>
-        <html lang="zh-CN">
-        <head>
-            <meta charset="utf-8">
-            <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <title>{title}</title>
-            <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/github-markdown-css/5.2.0/github-markdown.min.css">
-            <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
-            <script>
-                window.MathJax = {{
-                    tex: {{ inlineMath: [['$', '$'], ['\\(', '\\)']], displayMath: [['$$', '$$'], ['\\[', '\\]']] }},
-                    options: {{ skipHtmlTags: ['script', 'style', 'textarea'] }}
-                }};
-            </script>
-            <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
-            <style>
-                .markdown-body {{ box-sizing: border-box; min-width: 200px; max-width: 980px; margin: 0 auto; padding: 45px; }}
-                @media (max-width: 767px) {{ .markdown-body {{ padding: 15px; }} }}
-            </style>
-        </head>
-        <body class="markdown-body">
-            {back_link}
-            <h1>{title}</h1>
-            <div id="content"></div>
-            {sources_block}
-            <script type="text/markdown" id="raw-markdown">{safe_body}</script>
-            <script>
-                const rawMdElement = document.getElementById('raw-markdown');
-                if (rawMdElement) {{
-                    document.getElementById('content').innerHTML = marked.parse(rawMdElement.textContent);
-                    if (window.MathJax && window.MathJax.typesetPromise) {{
-                        window.MathJax.typesetPromise();
-                    }}
-                }}
-                function copySources() {{ }}
-            </script>
-        </body>
-        </html>
-        """
-
-    with open(daily_file_path, "w", encoding="utf-8") as f:
-        f.write(get_html_template(f"📄 Paper Report - {display_title}", arxiv_content or "", False, ""))
-
-    rebuild_index()
-
-    # 飞书推送卡片
-    if FEISHU_WEBHOOK:
-        requests.post(FEISHU_WEBHOOK, json={
-            "msg_type": "interactive",
-            "card": {
-                "header": {"title": {"tag": "plain_text", "content": f"📊 Paper Report | {display_title}"}, "template": "blue"},
-                "elements": [
-                    {"tag": "div", "text": {"tag": "lark_md", "content": f"今日共包含 **{vla_count}** 篇 VLA 筛选论文。"}},
-                    {"tag": "action", "actions": [{"tag": "button", "text": {"tag": "plain_text", "content": "🌐 查看网页"}, "type": "primary", "url": GITHUB_PAGES_URL}]}
-                ]
-            }
-        })
+def get_feishu_tenant_token() -> Optional[str]:
+    if not (FEISHU_APP_ID and FEISHU_APP_SECRET):
+        return None
+    if FEISHU_TENANT_TOKEN["token"] and time.time() < FEISHU_TENANT_TOKEN["expire"] - 60:
+        return str(FEISHU_TENANT_TOKEN["token"])
+    try:
+        response = _request(
+            "POST",
+            "https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal",
+            timeout=10,
+            json={"app_id": FEISHU_APP_ID, "app_secret": FEISHU_APP_SECRET},
+        )
+        data = response.json()
+        token = data.get("tenant_access_token")
+        if token:
+            FEISHU_TENANT_TOKEN["token"] = token
+            FEISHU_TENANT_TOKEN["expire"] = time.time() + int(data.get("expire", 7200))
+        return token
+    except Exception as exc:
+        LOGGER.warning("Feishu token request failed: %s", exc)
+        return None
 
 
-def send_feishu_notification(text):
-    """发送纯文本或简单 Markdown 到飞书"""
-    send_feishu_webhook(text)
+def _md_to_feishu_elements(content: str) -> List[Dict[str, Any]]:
+    elements: List[Dict[str, Any]] = []
+    buffer: List[str] = []
+
+    def flush() -> None:
+        if buffer:
+            text = "\n".join(buffer).strip()
+            if text:
+                elements.append({"tag": "div", "text": {"tag": "lark_md", "content": text}})
+            buffer.clear()
+
+    for line in content.splitlines():
+        stripped = line.strip()
+        if stripped in {"---", "***", "___"}:
+            flush()
+            elements.append({"tag": "hr"})
+        elif re.match(r"^#{1,4}\s", stripped):
+            flush()
+            heading = re.sub(r"^#{1,4}\s*", "", stripped)
+            elements.append({"tag": "div", "text": {"tag": "lark_md", "content": f"**{heading}**"}})
+        elif stripped:
+            buffer.append(stripped)
+    flush()
+    return elements
 
 
-def parse_input_items(raw):
-    """把用户输入的字符串（逗号/换行分隔的 ID 或 URL）解析成条目列表"""
-    items = []
-    for token in re.split(r'[\n,，;；\s]+', raw.strip()):
-        token = token.strip()
-        if not token:
-            continue
-        if token.startswith(('http://', 'https://')):
-            if 'arxiv.org' in token:
-                pid = extract_arxiv_id(token)
-                if pid:
-                    items.append({"id": pid})
-                    continue
-            # 非 arxiv 链接：生成稳定 slug
-            slug = hashlib.sha256(token.encode('utf-8')).hexdigest()[:10]
-            items.append({"url": token, "slug": slug})
-        else:
-            pid = extract_arxiv_id(token)
-            if pid:
-                items.append({"id": pid})
-    return items
+def send_feishu_markdown_to_chat(content: str, *, title: str, paper_url: str) -> bool:
+    token = get_feishu_tenant_token()
+    if not (TARGET_CHAT_ID and token):
+        return False
+    card = {
+        "header": {"title": {"tag": "plain_text", "content": title[:100]}, "template": "blue"},
+        "elements": ([{"tag": "div", "text": {"tag": "lark_md", "content": f"📎 [查看原文]({paper_url})"}}]
+                     + _md_to_feishu_elements(content)),
+    }
+    try:
+        response = _request(
+            "POST",
+            "https://open.feishu.cn/open-apis/im/v1/messages?receive_id_type=chat_id",
+            timeout=15,
+            headers={"Authorization": f"Bearer {token}"},
+            json={"receive_id": TARGET_CHAT_ID, "msg_type": "interactive", "content": json.dumps(card, ensure_ascii=False)},
+        )
+        return response.status_code == 200
+    except Exception as exc:
+        LOGGER.warning("Feishu app message failed: %s", exc)
+        return False
 
 
-def main():
-    target_str = os.getenv("PAPERS", "") or os.getenv("TARGET_IDS", "")
-    print(f"收到输入: {target_str!r}")
+def send_feishu_webhook(text: str) -> None:
+    if not FEISHU_WEBHOOK:
+        return
+    try:
+        _request("POST", FEISHU_WEBHOOK, timeout=10, json={"msg_type": "text", "content": {"text": text}})
+    except Exception as exc:
+        LOGGER.warning("Feishu webhook failed: %s", exc)
 
-    if target_str:
-        # --- 模式 A：手动深度解析 ---
-        items = parse_input_items(target_str)
-        if not items:
-            send_feishu_webhook("⚠️ 没有识别到有效的论文 ID 或 URL，请检查输入格式。")
-            print("没有识别到有效输入")
-            return
 
-        entries = []
-        for idx, item in enumerate(items, 1):
-            entry = deep_dive_paper(item, idx)
+def send_feishu_card(title: str, message: str) -> None:
+    if not FEISHU_WEBHOOK:
+        return
+    try:
+        _request(
+            "POST",
+            FEISHU_WEBHOOK,
+            timeout=10,
+            json={
+                "msg_type": "interactive",
+                "card": {
+                    "header": {"title": {"tag": "plain_text", "content": title[:100]}, "template": "blue"},
+                    "elements": [
+                        {"tag": "div", "text": {"tag": "lark_md", "content": message}},
+                        {"tag": "action", "actions": [{"tag": "button", "text": {"tag": "plain_text", "content": "查看网页"}, "type": "primary", "url": GITHUB_PAGES_URL}]},
+                    ],
+                },
+            },
+        )
+    except Exception as exc:
+        LOGGER.warning("Feishu card failed: %s", exc)
+
+
+def _extract_json_array(text: str) -> Optional[List[Dict[str, Any]]]:
+    try:
+        value = json.loads(text)
+        if isinstance(value, dict) and isinstance(value.get("papers"), list):
+            return value["papers"]
+        if isinstance(value, list):
+            return value
+    except json.JSONDecodeError:
+        pass
+    return None
+
+
+def only_filter_and_report(papers: List[Dict[str, str]]) -> str:
+    if not papers:
+        return "今日无新论文。"
+    selected: List[Dict[str, Any]] = []
+    failed: List[int] = []
+    for offset in range(0, len(papers), 40):
+        chunk = papers[offset : offset + 40]
+        prompt = f"""你是一个专注于大模型具身智能的研究员。请从以下论文中筛选相关论文并打分。
+只输出 JSON 对象 {{"papers": [{{"id": "论文ID", "title_en": "原题", "title_zh": "中文标题", "score": 9}}]}}。
+只保留 7 分及以上；id 必须逐字复制输入；不确定时不要猜测。
+待处理数据：{json.dumps(chunk, ensure_ascii=False)}"""
+        try:
+            parsed = _extract_json_array(_llm(prompt, response_format={"type": "json_object"}))
+            if parsed is None:
+                raise ReportError("screening output is not a JSON array")
+            selected.extend(parsed)
+        except Exception as exc:
+            failed.append(offset // 40 + 1)
+            LOGGER.warning("screening batch %s failed: %s", offset // 40 + 1, exc)
+
+    recommendations = [paper for paper in selected if paper.get("score", 0) >= 8]
+    if not recommendations:
+        return "今日无高分精选论文。" + (f"\n失败批次：{failed}" if failed else "")
+    report = "📊 **今日具身智能论文初筛建议**\n\n"
+    report += f"👉 [点击去手动触发解析](https://github.com/{REPO_OWNER}/{REPO_NAME}/actions)\n\n"
+    for paper in recommendations:
+        report += f"- `{paper.get('id', '')}` | 分数: {paper.get('score', '?')} | {paper.get('title_zh', '无标题')}\n"
+    if failed:
+        report += f"\n⚠️ 初筛失败批次：{failed}\n"
+    return report
+
+
+def generate_archive_and_index(date_info: Dict[str, str], content: str, *, output_dir: str = ".") -> None:
+    archive_dir = os.path.join(output_dir, "archive")
+    os.makedirs(archive_dir, exist_ok=True)
+    display_title = f"{date_info['prefix']} (VLA: {content.count('###')} of {date_info['total']} entries)"
+    safe_name = re.sub(r"[^\w\s-]", "", date_info["prefix"]).replace(" ", "_") or "report"
+    path = os.path.join(archive_dir, f"{safe_name}.html")
+    with open(path, "w", encoding="utf-8") as file:
+        file.write(_render_page(f"具身大模型简报 - {display_title}", content, back_link=True))
+    rebuild_index(output_dir)
+    send_feishu_card(f"具身精选 | {display_title}", f"今日共包含 **{content.count('###')}** 篇筛选论文。")
+
+
+def deep_dive_only(items: List[Dict[str, str]], *, output_dir: str = ".") -> List[Dict[str, str]]:
+    results: List[Dict[str, str]] = []
+    for index, item in enumerate(items, 1):
+        try:
+            entry = deep_dive_paper(item, index)
             if entry:
-                file_path = generate_single_page(entry)
-                print(f"已生成页面: {file_path}")
+                generate_single_page(entry, output_dir)
+                results.append(entry)
+                paper_url = entry["source_url"]
+                if not send_feishu_markdown_to_chat(entry["report"], title=entry["title"], paper_url=paper_url):
+                    send_feishu_card(entry["title"], f"📎 [查看原文]({paper_url})\n\n{entry['report'][:18000]}")
+        except Exception as exc:
+            LOGGER.exception("deep dive failed for %s: %s", item, exc)
+    rebuild_index(output_dir)
+    return results
 
-                # 把报告正文推送到飞书群（应用机器人 → webhook 回退）
-                paper_url = f"https://arxiv.org/abs/{entry['paper_id']}" if entry.get("paper_id") else entry.get("source_url", "")
-                card_elements = _md_to_feishu_card(entry["report"], title=entry["title"], paper_url=paper_url)
-                card = {
-                    "header": {"title": {"tag": "plain_text", "content": f"📄 {entry['title']}"}, "template": "blue"},
-                    "elements": card_elements
-                }
-                if TARGET_CHAT_ID and get_feishu_tenant_token():
-                    send_feishu_markdown_to_chat(entry["report"], title=entry["title"], paper_url=paper_url)
-                elif FEISHU_WEBHOOK:
-                    send_feishu_card_via_webhook(card)
 
-        rebuild_index()
-        print("done. 共生成", len(entries), "篇解析")
-    else:
-        # --- 模式 B：定时任务执行初筛汇报 ---
-        all_p = {}
-        date_info = None
-        for cat in CATEGORIES:
-            info, _, ps = scrape_arxiv(cat)
-            if info: date_info = info
-            for p in ps: all_p[p['id']] = p
+def main() -> None:
+    logging.basicConfig(level=logging.INFO)
+    raw_papers = os.getenv("PAPERS", "") or os.getenv("TARGET_IDS", "")
+    if raw_papers:
+        items = parse_input_items(raw_papers)
+        if not items:
+            send_feishu_webhook("⚠️ 没有识别到有效的论文 ID 或 URL。")
+            return
+        results = deep_dive_only(items)
+        LOGGER.info("done. generated %s paper pages", len(results))
+        return
 
-        report_list = only_filter_and_report(list(all_p.values()))
-        send_feishu_notification(report_list)
+    all_papers: Dict[str, Dict[str, str]] = {}
+    date_info: Optional[Dict[str, str]] = None
+    for category in CATEGORIES:
+        info, _, papers = scrape_arxiv(category)
+        if info:
+            date_info = info
+        for paper in papers:
+            all_papers[paper["id"]] = paper
+    report = only_filter_and_report(list(all_papers.values()))
+    if FILTER_WARNINGS:
+        report += "\n\n" + "\n".join(FILTER_WARNINGS)
+    send_feishu_webhook(report)
+    if date_info and os.getenv("GENERATE_SCREENING_ARCHIVE", "0") == "1":
+        generate_archive_and_index(date_info, report)
 
 
 if __name__ == "__main__":

@@ -1,41 +1,26 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>📚 Paper Report - 解析存档</title>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/github-markdown-css/5.2.0/github-markdown.min.css">
-    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
-    <style>
-        .markdown-body { box-sizing: border-box; min-width: 200px; max-width: 980px; margin: 0 auto; padding: 45px; }
-        @media (max-width: 767px) { .markdown-body { padding: 15px; } }
-    </style>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Paper Report - 解析存档</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/github-markdown-css/5.2.0/github-markdown.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js" defer></script>
+  <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js" defer></script>
+  <style>.markdown-body { box-sizing: border-box; max-width: 980px; margin: 0 auto; padding: 30px; } @media (max-width: 767px) { .markdown-body { padding: 15px; } }</style>
 </head>
 <body class="markdown-body">
-    <h1>📚 Paper Report - 解析存档</h1>
-    <div id="content"></div>
-    <script type="text/markdown" id="raw-markdown">### 📅 解析存档列表
-
-- [📄 Paper Report - 2607.28624 - PhiZero: A World Model Built Around Physical Language (PhiZero：围绕物理语言构建的世界模型)](archive/2607.28624.html)
-- [📄 Paper Report - 2607.26760 - （原文未提供完整标题，核心关键词为 Metis, Memory Foundation Models） (Metis：面向记忆的基础模型)](archive/2607.26760.html)
-- [📄 Paper Report - 2607.28443 - One Future, Every Robot: Label-Efficient Collective-State Prediction with Decentralized JEPA (一未来，每机器人：基于去中心化JEPA的标签高效集群状态预测)](archive/2607.28443.html)
-- [📄 Paper Report - 2607.28415 - QQWorld (原文未提供完整标题) (QQWorld：基于分位数匹配的世界模型潜变量正则化方法)](archive/2607.28415.html)
-- [📄 Paper Report - 2606.21501 - UniviewVLA: A Unified Multiview Vision-Language-Action Model with World Modeling (UniviewVLA：一种结合世界模型的统一多视角视觉-语言-动作模型)](archive/2606.21501.html)
-- [📄 Paper Report - 2608.00146 - DiffusionGemma (DiffusionGemma：基于离散扩散的高速文本生成模型)](archive/2608.00146.html)
-- [📄 Paper Report - 2608.02603 - WorldExam: Benchmarking World Models from Apparent Appearance to Inherent Reactivity (WorldExam：从表面外观到内在反应性的世界模型基准测试)](archive/2608.02603.html)
-- [📄 Paper Report - 2608.04956 - ContextMaster: Interactive Multi-Shot Video Creation via Fixed-Budget Sparse Context Routing (ContextMaster：通过固定预算稀疏上下文路由实现交互式多镜头视频创作)](archive/2608.04956.html)
-- [📄 Paper Report - 2608.05369 - World-to-Wrist: Task-Conditioned Future Wrist Modeling for Fine-Grained Robot Manipulation (从世界到手腕：用于精细机器人操作的任务条件化未来手腕建模)](archive/2608.05369.html)
-- [📄 Paper Report - 2608.06756 - Capek 0.5: An Execution-Centric Vision-Language Model for Embodied Intelligence (Capek 0.5：面向具身智能的以执行为中心的视觉语言模型)](archive/2608.06756.html)
-- [📄 Paper Report - 2608.01310 - FATE: Frame-Level Audio-Visual Temporal Embedding (FATE：帧级音视频时间嵌入)](archive/2608.01310.html)
-- [📄 Paper Report - 2608.00675 - Round-Trip Consistency: Bidirectional Diffusion Models Can Predict Their Own Rollout Errors (往返一致性：双向扩散模型能够预测自身的推演误差)](archive/2608.00675.html)
-- [📄 Paper Report - 2608.07408 - Addressable Memory for Video World Models (视频世界模型的可寻址内存)](archive/2608.07408.html)
-- [📄 Paper Report - 2608.02148 - （原文未提供完整标题，以核心模型名代指）Douyin Multimodal Embedding (DME) (抖音多模态嵌入模型 (DME))](archive/2608.02148.html)
-- [🤖 具身大模型简报 - 2608.05248 - WorldClaw: Agentic 3D Open-World Generation at Scale (WorldClaw：基于智能体架构的大规模3D开放世界生成)](archive/2608.05248.html)
-- [🤖 具身大模型简报 - 2602.10116 - SAGE: Scalable Agentic 3D Scene Generation for Embodied AI (SAGE：面向具身智能的可扩展智能体3D场景生成)](archive/2602.10116.html)
-</script>
-    <script>
-        const rawMdElement = document.getElementById('raw-markdown');
-        if (rawMdElement) { document.getElementById('content').innerHTML = marked.parse(rawMdElement.textContent); }
-    </script>
+  
+  <h1>Paper Report - 解析存档</h1>
+  <div id="content"></div>
+  <script type="application/json" id="raw-markdown">"### 📅 解析存档列表\n\n- [Paper Report - 2607.28624 - PhiZero: A World Model Built Around Physical Language (PhiZero：一个围绕物理语言构建的世界模型)](archive/2607.28624.html)\n- [📄 Paper Report - 2607.26760 - （原文未提供完整标题，核心关键词为 Metis, Memory Foundation Models） (Metis：面向记忆的基础模型)](archive/2607.26760.html)\n- [📄 Paper Report - 2607.28443 - One Future, Every Robot: Label-Efficient Collective-State Prediction with Decentralized JEPA (一未来，每机器人：基于去中心化JEPA的标签高效集群状态预测)](archive/2607.28443.html)\n- [📄 Paper Report - 2607.28415 - QQWorld (原文未提供完整标题) (QQWorld：基于分位数匹配的世界模型潜变量正则化方法)](archive/2607.28415.html)\n- [📄 Paper Report - 2606.21501 - UniviewVLA: A Unified Multiview Vision-Language-Action Model with World Modeling (UniviewVLA：一种结合世界模型的统一多视角视觉-语言-动作模型)](archive/2606.21501.html)\n- [📄 Paper Report - 2608.00146 - DiffusionGemma (DiffusionGemma：基于离散扩散的高速文本生成模型)](archive/2608.00146.html)\n- [📄 Paper Report - 2608.02603 - WorldExam: Benchmarking World Models from Apparent Appearance to Inherent Reactivity (WorldExam：从表面外观到内在反应性的世界模型基准测试)](archive/2608.02603.html)\n- [📄 Paper Report - 2608.04956 - ContextMaster: Interactive Multi-Shot Video Creation via Fixed-Budget Sparse Context Routing (ContextMaster：通过固定预算稀疏上下文路由实现交互式多镜头视频创作)](archive/2608.04956.html)\n- [📄 Paper Report - 2608.05369 - World-to-Wrist: Task-Conditioned Future Wrist Modeling for Fine-Grained Robot Manipulation (从世界到手腕：用于精细机器人操作的任务条件化未来手腕建模)](archive/2608.05369.html)\n- [📄 Paper Report - 2608.06756 - Capek 0.5: An Execution-Centric Vision-Language Model for Embodied Intelligence (Capek 0.5：面向具身智能的以执行为中心的视觉语言模型)](archive/2608.06756.html)\n- [📄 Paper Report - 2608.01310 - FATE: Frame-Level Audio-Visual Temporal Embedding (FATE：帧级音视频时间嵌入)](archive/2608.01310.html)\n- [📄 Paper Report - 2608.00675 - Round-Trip Consistency: Bidirectional Diffusion Models Can Predict Their Own Rollout Errors (往返一致性：双向扩散模型能够预测自身的推演误差)](archive/2608.00675.html)\n- [📄 Paper Report - 2608.07408 - Addressable Memory for Video World Models (视频世界模型的可寻址内存)](archive/2608.07408.html)\n- [📄 Paper Report - 2608.02148 - （原文未提供完整标题，以核心模型名代指）Douyin Multimodal Embedding (DME) (抖音多模态嵌入模型 (DME))](archive/2608.02148.html)\n- [🤖 具身大模型简报 - 2608.05248 - WorldClaw: Agentic 3D Open-World Generation at Scale (WorldClaw：基于智能体架构的大规模3D开放世界生成)](archive/2608.05248.html)\n- [🤖 具身大模型简报 - 2602.10116 - SAGE: Scalable Agentic 3D Scene Generation for Embodied AI (SAGE：面向具身智能的可扩展智能体3D场景生成)](archive/2602.10116.html)"</script>
+  <script>
+    window.addEventListener("DOMContentLoaded", function () {
+      const markdown = JSON.parse(document.getElementById("raw-markdown").textContent);
+      const target = document.getElementById("content");
+      if (!window.marked || !window.DOMPurify) { target.textContent = markdown; return; }
+      target.innerHTML = DOMPurify.sanitize(marked.parse(markdown));
+    });
+  </script>
 </body>
 </html>
