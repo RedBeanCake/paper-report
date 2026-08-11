@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>📄 Paper Report - 2606.21501 - UniviewVLA: A Unified Multiview Vision-Language-Action Model with World Modeling (UniviewVLA：一种结合世界模型的统一多视角视觉-语言-动作模型)</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/github-markdown-css/5.2.0/github-markdown.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script>
+        window.MathJax = {
+            tex: { inlineMath: [['$', '$'], ['\(', '\)']], displayMath: [['$$', '$$'], ['\[', '\]']] },
+            options: { skipHtmlTags: ['script', 'style', 'textarea'] }
+        };
+    </script>
+    <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+    <style>
+        .markdown-body { box-sizing: border-box; min-width: 200px; max-width: 980px; margin: 0 auto; padding: 45px; }
+        @media (max-width: 767px) { .markdown-body { padding: 15px; } }
+    </style>
+</head>
+<body class="markdown-body">
+    <a href='../index.html' style='margin-bottom:20px; display:block;'>← 返回主索引</a>
+    <h1>📄 Paper Report - 2606.21501 - UniviewVLA: A Unified Multiview Vision-Language-Action Model with World Modeling (UniviewVLA：一种结合世界模型的统一多视角视觉-语言-动作模型)</h1>
+    <div id="content"></div>
+    <script type="text/markdown" id="raw-markdown">### 1. 🔥 [UniviewVLA: A Unified Multiview Vision-Language-Action Model with World Modeling](https://arxiv.org/abs/2606.21501) (UniviewVLA：一种结合世界模型的统一多视角视觉-语言-动作模型)
+- **研究机构**: `同济大学、上海创新研究院、上海交通大学、小米汽车 (Xiaomi EV)`
+- **Arxiv ID**: `2606.21501` | [点击跳转](https://arxiv.org/abs/2606.21501)
+
+**0. 论文标题**
+- **英文标题**: UniviewVLA: A Unified Multiview Vision-Language-Action Model with World Modeling
+- **中文标题**: UniviewVLA：一种结合世界模型的统一多视角视觉-语言-动作模型
+- **研究机构**: 同济大学、上海创新研究院、上海交通大学、小米汽车 (Xiaomi EV)
+- **一句话总结**: 不加物理相机也不做3D重建，直接用世界模型从标准双视角“生成”多视角的未来场景特征，并通过Token压缩和动态熵选择解决推理延迟和视角切换问题，大幅提升机器人抗遮挡操作能力。
+
+**1. 整体逻辑**
+- **研究任务**: 解决机器人操作中的视觉遮挡问题（即 Vision-Language-Action 模型在关键操作线索被遮挡时容易失效）。
+- **研究动机**: 现有解决遮挡的方法要么加物理相机（要求训练和推理时的相机数量、位姿严格对齐，极难扩展），要么做显式3D重建（计算成本高，且只能看当前状态，缺乏对未来动态的预判）。
+- **本质改动**: 用生成式世界模型替代物理相机和3D重建。直接从标准的两个相机视角（agent-view, wrist-view）自回归“脑补”出多个辅助视角的未来场景特征，为动作预测提供全局视角和未来预判。
+- **技术溯源**: 基于 UniVLA 的离散 token 自回归架构；视觉量化使用 VQ (Visual Quantization)；动作量化使用 FAST action tokenizer；自回归基座模型为 Emu3。
+
+**2. 技术拆解**
+- **核心方法**: 采用“两阶段训练 + 推理时动态视角选择”的范式。先训练世界模型生成多视角未来特征，再微调动作预测，最后在推理时动态挑选信息量最大的视角。
+- **关键细节**: 
+  - **输入输出**: 输入为当前两帧标准视角历史 + 语言指令；输出为多个候选辅助视角的未来 VQ token 序列，以及最终的 FAST 动作 token。
+  - **运动信息 Token 压缩**: 完整生成的辅助视角有 625 个 token (25×25)，太慢且冗余。方法通过计算相邻帧 VQ embedding 的余弦距离，只保留视觉变化最大的 16 个 token (4×4)，大幅剔除静态背景冗余。
+  - **动态视角选择**: 推理时，不同阶段最清晰的视角不同。模型会计算每个候选视角输出动作的香农熵（Action Entropy），选择熵最低（即模型最确定、信息量最大）的视角来输出最终动作，并且每 30 步动态切换一次。
+- **训练/优化目标**: 
+  - **Stage 1 (世界模型后训练)**: 自回归视觉预测损失（预测未来辅助视角的 VQ token）。
+  - **Stage 2 (动作微调)**: 自回归交叉熵损失（联合预测压缩后的辅助视角 token 和动作 token）。
+
+**3. 实验结果**
+- **实验设置**: 
+  - **无遮挡基准**: LIBERO, CALVIN ABCD→D。
+  - **遮挡基准**: 自定义的 6 个 LIBERO 风格仿真遮挡任务，以及 2 个基于 ALOHA 平台的真机遮挡任务（如把饼干放到电饭煲后的盘子里）。
+  - **对比对象**: OpenVLA, π0-FAST, UniVLA, GR00T N1 等 SOTA VLA 模型，以及物理三相机策略。
+- **评价指标**: LIBERO 成功率 (%), CALVIN 平均连续成功步数, 遮挡任务成功率 (%), 真机操作成功率 (%), 推理延迟 (s)。
+- **主要结果**: 
+  - **无遮挡基准**: LIBERO 达到 95.8%，CALVIN 达到 4.60，均达到 SOTA，证明生成多视角特征对常规任务也有增益。
+  - **遮挡仿真**: 平均成功率从双相机的 40.0% 大幅提升至 73.3%（物理三相机为 66.3%），证明了“脑补”视角的有效性。
+  - **真机部署**: 在 ALOHA 遮挡任务中，双相机平均成功率约 16.6%，UniviewVLA 仅用双相机达到约 50.0%，平均提升 33.4 个百分点，逼近物理三相机效果，且无需额外部署硬件。
+  - **效率优化**: 通过 Token 压缩，单视角生成延迟从 6–7 秒大幅降至 0.2–0.3 秒，满足了闭环控制的实时性要求。
+
+---
+</script>
+    <script>
+        const rawMdElement = document.getElementById('raw-markdown');
+        if (rawMdElement) {
+            document.getElementById('content').innerHTML = marked.parse(rawMdElement.textContent);
+            if (window.MathJax && window.MathJax.typesetPromise) {
+                window.MathJax.typesetPromise();
+            }
+        }
+    </script>
+</body>
+</html>
