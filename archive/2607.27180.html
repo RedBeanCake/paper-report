@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Paper Report - 2607.27180 - HumanCLAW: Can Vision-Language Models Act Through a Body? (HumanCLAW：视觉语言模型能通过身体行动吗？)</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/github-markdown-css/5.2.0/github-markdown.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js" defer></script>
+  <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js" defer></script>
+  <style>.markdown-body { box-sizing: border-box; max-width: 980px; margin: 0 auto; padding: 30px; } @media (max-width: 767px) { .markdown-body { padding: 15px; } }</style>
+</head>
+<body class="markdown-body">
+  <a href="../index.html">&#8592; 返回主索引</a>
+  <h1>Paper Report - 2607.27180 - HumanCLAW: Can Vision-Language Models Act Through a Body? (HumanCLAW：视觉语言模型能通过身体行动吗？)</h1>
+  <div id="content"></div>
+  <script type="application/json" id="raw-markdown">"### 1. 🔥 [HumanCLAW: Can Vision-Language Models Act Through a Body?](https://arxiv.org/abs/2607.27180) (HumanCLAW：视觉语言模型能通过身体行动吗？)\n- **研究机构**: `原文未提及`\n- **ArXiv ID**: `2607.27180` | [点击跳转](https://arxiv.org/abs/2607.27180)\n\n**0. 论文标题**\n- **英文标题**: HumanCLAW: Can Vision-Language Models Act Through a Body?\n- **中文标题**: HumanCLAW：视觉语言模型能通过身体行动吗？\n- **研究机构**: 原文未提及\n- **一句话总结**: 提出 HumanCLAW 框架与基准，通过将动作决策与底层运动控制解耦，评估 VLM 在物理世界中的具身行动智能，揭示当前模型缺乏“具身自我意识”而非视觉感知能力。\n\n**1. 整体逻辑**\n- **研究任务**: 评估视觉语言模型（VLM）是否具备“行动智能（action intelligence）”，即在物理世界中通过身体进行长视野的闭环决策与交互。\n- **研究动机**: 现有评估要么将动作抽象为符号或脚本（忽略物理后果），要么使用端到端 VLA（将决策与底层运动控制耦合，难以区分是决策错误还是底层控制失败如失去平衡）。需要一种既能体现真实物理后果，又能剥离底层运动控制干扰的评估方法。\n- **本质改动**: 提出 HumanCLAW 框架，将 VLM 的高层决策与底层全身运动执行解耦。VLM 仅输出原子技能命令，由运动生成器转化为连续动作，并在“半物理”模拟器中执行（保留碰撞、重力等物理交互，但滤除平衡和运动跟踪错误），从而纯粹衡量模型的行动智能。\n- **技术溯源**: 借鉴了 CLAW-like 智能体通过符号接口将语言目标转化为动作的思想，将其扩展至物理空间中的全身运动控制；结合了基于 DiT 的运动生成先验与 ControlNet 技能适配器技术。\n\n**2. 技术拆解**\n- **核心方法**: \n  1. **决策 Harness**：通过上下文提示、自我感知和高-中-低层推理脚手架，引导冻结的 VLM 从第一人称视角输出参数化的原子技能（如走、转、坐）。\n  2. **技能条件运动生成器**：使用基于 Flow Matching 的 Motion Base DiT 作为无技能运动先验，结合每个原子技能的 ControlNet 适配器，将 VLM 的文本/JSON 技能指令转化为 0.5 秒的连续全身运动块。\n  3. **半物理模拟（Half-physics）**：在 AI Habitat 中，人体不通过关节扭矩驱动，而是通过等效运动学速度驱动。保留环境碰撞、重力和物体位移，但解耦底层运动控制（不会因失去平衡而摔倒）。\n  4. **空间响应验证器**：在执行前，通过特定技能的检查清单验证 VLM 的决策是否会导致意外后果（如撞墙、悬空坐下），纠正空间幻觉。\n- **关键细节**: \n  - 原子技能包括：walk, side_step, step_back, turn_in_place, climb_upstairs, walk_downstairs, sit_in_place, stop。\n  - 运动生成中，Base DiT 将过去 5 帧历史与未来 15 帧噪声直接拼接为 token，不压缩历史，保证运动学连续性。\n  - ControlNet 适配器零初始化，仅训练控制分支和条件编码器，新增技能无需重训基础模型。\n- **训练/优化目标**: \n  - Base DiT 和 ControlNet 均使用 Flow Matching 目标，最小化预测速度场与真实速度场的 L2 损失。训练数据来自过滤后的 AMASS 动作捕捉数据集。\n\n**3. 实验结果**\n- **实验设置**: \n  - **基准构建**：HumanCLAW-Bench，包含 41 个室内场景（基于 HSSD），1218 个长视野、第一人称的“寻找-导航-交互（坐下）”任务。\n  - **评估模型**：9 个 SOTA VLM（如 Gemini-3.1, GPT-5.5, Claude-4.8, Gemma-4-31B 等）作为冻结决策者。\n  - **对比基线**：MoMask（用于运动保真度对比）。\n- **评价指标**: \n  - **渐进成功率**：FindSR（找到目标）、NavSR（导航至目标 20cm 内）、InteractSR（坐下并接触目标），区分客观几何成功与主观确认成功。\n  - **动作质量**：Motion Jerk（运动加加速度，衡量动作连贯性）。\n  - **身体意识与物理干扰**：碰撞步数比例、扰动物体数量及位移距离。\n  - **计算成本**：每集消耗的 Token 数。\n- **主要结果**: \n  - **运动保真度高**：本文方法的技能执行幅度比率接近 1 且方差极小，而 MoMask 无法精确控制动作幅度。\n  - **整体成功率极低**：没有 VLM 能解决该基准，最强模型（Gemini-3.1）成功率仅 16.8%。\n  - **失败归因分析（核心发现）**：\n    1. **感知不是瓶颈**：目标在视野中时识别率很高，寻找失败主要因为探索策略无效。\n    2. **导航瓶颈在于自我定位**：68% 找到目标的 episode 导航失败，主因是缺乏身体意识（不知道是否到达，或撞墙了仍在发前进指令）。\n    3. **到达不等于交互**：71% 导航成功的 episode 交互失败，主因是“坐在空气中”或坐错地方。\n    4. **核心缺陷**：当前 VLM 缺乏“具身自我意识（embodied self-awareness）”，它们能描述世界，但无法感知自身身体的位置、状态及与环境的物理交互。\n\n---\n"</script>
+  <script>
+    window.addEventListener("DOMContentLoaded", function () {
+      const markdown = JSON.parse(document.getElementById("raw-markdown").textContent);
+      const target = document.getElementById("content");
+      if (!window.marked || !window.DOMPurify) { target.textContent = markdown; return; }
+      target.innerHTML = DOMPurify.sanitize(marked.parse(markdown));
+    });
+  </script>
+</body>
+</html>
