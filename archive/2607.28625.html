@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Paper Report - 2607.28625 - ACE-Data-0: Human-Centric Ambient Capture as Embodied Data Engine (ACE-Data-0：以人为中心的环境捕捉作为具身数据引擎)</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/github-markdown-css/5.2.0/github-markdown.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js" defer></script>
+  <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js" defer></script>
+  <style>.markdown-body { box-sizing: border-box; max-width: 980px; margin: 0 auto; padding: 30px; } @media (max-width: 767px) { .markdown-body { padding: 15px; } }</style>
+</head>
+<body class="markdown-body">
+  <a href="../index.html">&#8592; 返回主索引</a>
+  <h1>Paper Report - 2607.28625 - ACE-Data-0: Human-Centric Ambient Capture as Embodied Data Engine (ACE-Data-0：以人为中心的环境捕捉作为具身数据引擎)</h1>
+  <div id="content"></div>
+  <script type="application/json" id="raw-markdown">"### 1. 🔥 [ACE-Data-0: Human-Centric Ambient Capture as Embodied Data Engine](https://arxiv.org/abs/2607.28625) (ACE-Data-0：以人为中心的环境捕捉作为具身数据引擎)\n- **研究机构**: `原文未提及`\n- **ArXiv ID**: `2607.28625` | [点击跳转](https://arxiv.org/abs/2607.28625)\n\n**0. 论文标题**\n- **英文标题**: ACE-Data-0: Human-Centric Ambient Capture as Embodied Data Engine\n- **中文标题**: ACE-Data-0：以人为中心的环境捕捉作为具身数据引擎\n- **研究机构**: 原文未提及\n- **一句话总结**: 提出包含桌面级与房间级双尺度配置的环境捕捉引擎（ACE），构建150小时多模态同步长时家庭交互数据集ACE-Data-0，并建立分层基准测试暴露现有具身感知方法在真实家庭场景中的不足。\n\n**1. 整体逻辑**\n- **研究任务**: 构建能全面记录人类在真实家庭环境中长时、多模态、感知-动作闭环交互的高质量数据集及评测基准，打破具身智能面临的数据瓶颈。\n- **研究动机**: 现有HOI（人类-物体交互）数据集存在三大缺陷：1）模态碎片化，缺乏同步的第三视角、音频或触觉；2）环境不自然，多在实验室采集，缺乏真实家庭的遮挡和空间约束；3）时间跨度短，多为几秒的原子动作，缺乏长时目标导向任务，无法提供完整的感知-动作闭环数据。\n- **本质改动**: 设计环境捕捉引擎（ACE），在真实家庭环境中通过桌面级（聚焦精细手物操作）和房间级（聚焦全身运动与场景交互）双尺度配置，同步采集第一/第三人称视频、全身/手部动捕、物体6-DoF轨迹、音频和触觉信号；发布包含150小时、1700万帧、7.5万个交互片段的ACE-Data-0数据集，并建立从信号到组件再到交互的三层级评测基准。\n- **技术溯源**: 具身智能与人类-物体交互数据集的演进。从早期局部抓取数据集（如ContactPose）、全身HOI数据集（如BEHAVE），到大规模自我中心视角数据集（如Ego4D）及长时任务数据集（如OakInk2）。本文在此基础上，融合了多模态硬同步、真实家庭环境长时记录与物理级Ground Truth。\n\n**2. 技术拆解**\n- **核心方法**: \n  1. **双尺度环境捕捉引擎（ACE）**：桌面级配置（30平米，8个近距离GoPro，16个OptiTrack动捕相机）聚焦精细手物操作；房间级配置（200平米公寓，8个ZED One广角相机，12个OptiTrack相机）聚焦全身运动与场景交互。\n  2. **多模态时空同步与校准**：以OptiTrack动捕时钟为基准，通过QR码时钟读取和IMU信号匹配实现毫秒级时间同步；通过带反光标记的ArUco标定板和动捕系统联合标定实现空间校准，将自我中心相机位姿从“视觉估计”转为“物理测量”。\n  3. **目标导向的任务设计**：设计原子HOI、长时HOI任务链和人类-场景交互（HSI）三类任务，采用目标级指令让受试者自由规划，保留自然行为变异。\n- **关键细节**: \n  1. **时间同步**：外参相机通过拍摄屏幕上的纳秒级QR码时钟对齐OptiTrack时钟，消除网络延迟与漂移；自我中心相机通过受试者开头10秒注视屏幕读取时钟对齐；触觉手套通过IMU信号与头显对齐。\n  2. **空间校准**：外参相机使用带OptiTrack反光标记的ArUco板，利用动捕系统确定标记真实位置再拟合相机参数，解决相机间缺乏共视区的问题；自我中心相机利用头显上的5个OptiTrack标记直接测量位姿，结合手眼标定求解相机到刚体的变换。\n  3. **自动化标注**：除文本描述由大模型（Gemini）生成并人工校对外，人体/物体位姿、触觉标签、边界框等均由物理传感器直接测量并投影生成，无需估计模型介入，保证在遮挡和模糊下的绝对准确性。\n- **训练/优化目标**: 原文未提及（本文为核心数据集与基准构建，未涉及具体下游模型的训练与优化目标，旨在为模仿学习、世界模型和VLA系统提供对齐的监督信号）。\n\n**3. 实验结果**\n- **实验设置**: 基于ACE-Data-0构建三层级基准测试，留出10小时数据作为测试集，使用各方法官方预训练权重进行评估：1) 低级信号推断（从自我中心视频预测触觉信号）；2) 场景组件恢复（从单/多视角外参或自我中心视频估计人体运动）；3) 交互估计（从自我中心或外参视频估计手部运动）。\n- **评价指标**: \n  1) 触觉预测：时间准确率（Temporal Acc.）、接触IoU（C-IoU）、体积IoU（V-IoU）、压力中心误差（CoP）。\n  2) 人体运动估计：PA-MPJPE, PA-PVE, MPJPE, PVE, WA-MPJPE（全局轨迹误差）。\n  3) 手部运动估计：PA-MPJPE, MPJPE, F@5, F@15, AUC J, 轨迹误差（Traj. err.）。\n- **主要结果**: \n  1) **触觉预测**：现有最优方法（TouchAnything）在时间准确率上表现尚可，但在空间重叠（C-IoU/V-IoU）和压力定位（CoP）上表现有限，难以在严重遮挡下恢复精细压力分布。\n  2) **人体运动估计**：局部姿态估计（PA-MPJPE）表现较好，但全局轨迹恢复（WA-MPJPE）误差极大；场景感知方法主要帮助确定人在房间中的位置，对相对关节构型提升不大；自我中心视角方法因视野受限表现最差。\n  3) **手部运动估计**：外参视角方法在全局轨迹估计上（误差63mm）显著优于自我中心视角方法（误差约100mm），表明自我中心视角下的主要误差来源是自我运动（egomotion）估计而非单帧手指关节估计；联合建模物体（如HORT）并未明显提升手部姿态精度。\n\n---\n"</script>
+  <script>
+    window.addEventListener("DOMContentLoaded", function () {
+      const markdown = JSON.parse(document.getElementById("raw-markdown").textContent);
+      const target = document.getElementById("content");
+      if (!window.marked || !window.DOMPurify) { target.textContent = markdown; return; }
+      target.innerHTML = DOMPurify.sanitize(marked.parse(markdown));
+    });
+  </script>
+</body>
+</html>
