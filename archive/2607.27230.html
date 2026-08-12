@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Paper Report - 2607.27230 - Multi-Head Attention Residuals (多头注意力残差)</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/github-markdown-css/5.2.0/github-markdown.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js" defer></script>
+  <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js" defer></script>
+  <style>.markdown-body { box-sizing: border-box; max-width: 980px; margin: 0 auto; padding: 30px; } @media (max-width: 767px) { .markdown-body { padding: 15px; } }</style>
+</head>
+<body class="markdown-body">
+  <a href="../index.html">&#8592; 返回主索引</a>
+  <h1>Paper Report - 2607.27230 - Multi-Head Attention Residuals (多头注意力残差)</h1>
+  <div id="content"></div>
+  <script type="application/json" id="raw-markdown">"### 1. 🔥 [Multi-Head Attention Residuals](https://arxiv.org/abs/2607.27230) (多头注意力残差)\n- **研究机构**: `原文未提及`\n- **ArXiv ID**: `2607.27230` | [点击跳转](https://arxiv.org/abs/2607.27230)\n\n**0. 论文标题**\n- **英文标题**: Multi-Head Attention Residuals\n- **中文标题**: 多头注意力残差\n- **研究机构**: 原文未提及\n- **一句话总结**: 提出多头注意力残差（MHAR），将深度路由的单一查询拆分为多个特征子空间独立的查询头，在零额外参数和计算量下显著降低Transformer验证损失，并配套高效Triton算子支持大规模训练。\n\n**1. 整体逻辑**\n- **研究任务**: 优化Transformer中跨层（深度）的信息传递机制，解决现有“注意力残差”中单一查询路由导致的特征子空间“强制妥协”问题。\n- **研究动机**: 现有的注意力残差允许子层通过学习的softmax对历史层输出进行路由读取，但所有特征维度共享同一个查询向量。随着模型宽度增加，不同特征子空间对“该读取哪些历史层”的分歧加剧，单一查询被迫折中，导致性能瓶颈。\n- **本质改动**: 将单一的路由查询向量重塑（reshape）为 $H$ 个针对特定特征子空间的独立查询头，每个头在深度历史上拥有独立的softmax分布，使读取操作变为块对角形式。\n- **技术溯源**: 基于注意力残差（Attention Residuals）机制，借鉴标准自注意力中“多头（Multi-Head）”的设计思想，将其平移至深度（层）维度的路由上。\n\n**2. 技术拆解**\n- **核心方法**: Multi-Head Attention Residuals (MHAR)。将维度为 $d$ 的单路由查询重塑为 $(H, d/H)$ 的张量，使 $H$ 个子空间各自独立计算深度历史的softmax权重并进行加权混合。当 $H=1$ 时，严格退化为原有的单头注意力残差。\n- **关键细节**: \n  1. **零参数与极低开销**：多头拆分仅为张量reshape，总参数量保持 $d$ 不变，仅增加可忽略的 $H$ 个短序列softmax计算。\n  2. **头数 $H$ 的U型最优**：$H$ 是核心设计轴。验证损失随 $H$ 呈U型，在 $H=4$ 或 $H=8$ 时达到平坦最优。过度拆分（如 $H=16$）会割裂连贯特征，导致性能回退。大模型推荐默认 $H=8$。\n  3. **融合Triton算子**：深度路由是内存带宽受限操作。作者开发了融合前向/反向的Triton算子，通过在线softmax和就地梯度累加，消除历史状态的重复读写，大幅提升吞吐量。\n  4. **恒等转换机制**：支持在预训练模型上无缝引入MHAR（使用delta形式并零初始化门控），保证转换前后模型数值完全一致，不引发Loss spike。\n- **训练/优化目标**: 最小化验证集交叉熵损失（Validation loss）。路由伪查询（pseudo-queries）采用零初始化，使初始深度分布为均匀平均。\n\n**3. 实验结果**\n- **实验设置**: \n  1. **从头预训练**：在100M、350M、1B规模上，使用偏重STEM和代码的Nemotron质量过滤语料（anneal_pt_v3）训练20K步。对比标准Transformer、Hyper-connections、单头注意力残差和MHAR。\n  2. **中训练（Mid-training）**：在8B规模（Marin-8B）上，使用约10B token的同类语料进行持续预训练。\n- **评价指标**: 验证损失（Validation loss）、下游零样本任务准确率（GSM8K, GPQA, MMLU, MATH, HumanEval, MBPP）、WikiText-2困惑度、LAMBADA及HellaSwag。\n- **主要结果**: \n  1. **预训练Loss显著降低**：MHAR在100M/350M/1B规模上均取得最佳验证损失，较标准Transformer分别降低0.061、0.149和0.140，且收益随规模扩大而增加。单头注意力残差在Web通用语料上随规模增大甚至劣于Baseline，而MHAR表现稳健。\n  2. **下游任务提升**：跨分布评测中，MHAR全面改善WikiText-2困惑度和LAMBADA准确率；在8B中训练中，相比严格对齐训练进度的Baseline，GSM8K提升+3.2（p=0.004），GPQA提升+3.1（p=0.038）。\n  3. **系统开销大幅优化**：融合Triton算子将MHAR的训练吞吐量从Baseline的0.2-0.5x提升至0.55-0.88x（100M-1B规模），并维持接近Baseline的峰值显存；8B中训练时路由操作本身加速2.0x，端到端吞吐量提升约30%。\n\n---\n"</script>
+  <script>
+    window.addEventListener("DOMContentLoaded", function () {
+      const markdown = JSON.parse(document.getElementById("raw-markdown").textContent);
+      const target = document.getElementById("content");
+      if (!window.marked || !window.DOMPurify) { target.textContent = markdown; return; }
+      target.innerHTML = DOMPurify.sanitize(marked.parse(markdown));
+    });
+  </script>
+</body>
+</html>
