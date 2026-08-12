@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Paper Report - 2607.27380 - VideoCoCo: Code-as-CoT for Physically-Consistent Video Generation via an Agentic Dual-Engine System (VideoCoCo：通过智能体双引擎系统实现代码即思维链的物理一致性视频生成)</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/github-markdown-css/5.2.0/github-markdown.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js" defer></script>
+  <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js" defer></script>
+  <style>.markdown-body { box-sizing: border-box; max-width: 980px; margin: 0 auto; padding: 30px; } @media (max-width: 767px) { .markdown-body { padding: 15px; } }</style>
+</head>
+<body class="markdown-body">
+  <a href="../index.html">&#8592; 返回主索引</a>
+  <h1>Paper Report - 2607.27380 - VideoCoCo: Code-as-CoT for Physically-Consistent Video Generation via an Agentic Dual-Engine System (VideoCoCo：通过智能体双引擎系统实现代码即思维链的物理一致性视频生成)</h1>
+  <div id="content"></div>
+  <script type="application/json" id="raw-markdown">"### 1. 🔥 [VideoCoCo: Code-as-CoT for Physically-Consistent Video Generation via an Agentic Dual-Engine System](https://arxiv.org/abs/2607.27380) (VideoCoCo：通过智能体双引擎系统实现代码即思维链的物理一致性视频生成)\n- **研究机构**: `原文未提及`\n- **ArXiv ID**: `2607.27380` | [点击跳转](https://arxiv.org/abs/2607.27380)\n\n**0. 论文标题**\n- **英文标题**: VideoCoCo: Code-as-CoT for Physically-Consistent Video Generation via an Agentic Dual-Engine System\n- **中文标题**: VideoCoCo：通过智能体双引擎系统实现代码即思维链的物理一致性视频生成\n- **研究机构**: 原文未提及\n- **一句话总结**: 提出 VideoCoCo 双引擎框架，将可执行的 Blender 代码作为过程级思维链，通过“物理模拟草稿+视频编辑”的解耦设计，显著提升了文本到视频生成的物理一致性。\n\n**1. 整体逻辑**\n- **研究任务**: 生成物理规律一致且时间连贯的文本到视频（Text-to-Video）。\n- **研究动机**: 现有 T2V 模型依赖高度压缩的文本提示隐式推断物理过程（存在“因果不透明”问题）。现有的视觉思维链方法（如文本计划、关键帧或中间视觉状态）通常不可执行或时间上稀疏，无法精确实例化和控制完整的时空物理演变。\n- **本质改动**: 引入可执行的 Blender 代码作为过程级思维链（Code-as-CoT），将物理过程推理（模拟引擎）与高保真视觉实现（生成引擎）彻底解耦，让代码负责“发生什么”，让视频模型负责“看起来怎样”。\n- **技术溯源**: 结合了代码智能体（Code Agents）、视觉生成中的思维链（Chain-of-Thought for Visual Generation）以及条件视频编辑技术。\n\n**2. 技术拆解**\n- **核心方法**: 提出智能体双引擎框架 VideoCoCo。1）**可执行模拟引擎**：代码智能体将文本提示转化为 Blender Python 程序，在沙盒中运行，生成确定性的低保真（白粘土风格）但物理正确的时空草稿。2）**生成视频引擎**：指令智能体根据提示和草稿生成外观编辑指令，随后草稿条件视频编辑器以草稿和指令为条件，将草稿转化为照片级真实的最终视频。\n- **关键细节**: 1）选择 Blender 代码是因为其具备显式（无歧义）、可执行（能实际运行）和可检查（透明可修改）三大优势。2）指令智能体专门生成关注外观（材质、光照、风格）的指令，被严格限制重新定义草稿中已有的运动。3）构建了 VideoCoCo-3K 数据集（包含草稿-指令-目标三元组），使用 Seedance 2.0 作为教师模型生成高保真目标，以解决缺乏“模拟草稿到真实视频”对齐数据的问题。\n- **训练/优化目标**: 在 VideoCoCo-3K 数据集上，使用标准条件扩散去噪目标（最小化预测噪声与真实噪声的 L2 距离）微调视频编辑器。对比了全参数微调和 LoRA 微调，发现 LoRA 效果最佳，能在保留基础模型强大视觉先验的同时，学会将白粘土草稿重绘为真实视频。\n\n**3. 实验结果**\n- **实验设置**: 在 PhyGenBench 和 VBench-2.0 两个物理聚焦的视频基准上评估。对比了多种闭源（Pika, Gen-3, Kling, Sora）和开源（CogVideoX, Open-Sora, HunyuanVideo, Wan2.2 等）T2V 模型。基础生成器采用 OmniWeaving。\n- **评价指标**: PhyGenBench 使用 GPT-4o 评估力学、光学、热学、材料动力学的物理一致性得分（[0,1]）及平均分；VBench-2.0 评估力学、热学、材料的物理合理性百分比（%）。\n- **主要结果**: 1）在 PhyGenBench 上，VideoCoCo 将 OmniWeaving 的平均分从 0.475 提升至 0.558（表格中记为 0.56），取得整体最佳，在力学、光学和材料上排名第一，热学排名第二。2）在 VBench-2.0 上，平均分从 52.18% 大幅提升至 77.88%，力学和热学得分最佳。3）消融实验表明，LoRA 微调编辑器（0.558）优于全参数微调（0.535）和无微调（0.506），证明可执行草稿提供了核心的物理增益，而轻量级微调则有效优化了外观表现。\n\n---\n"</script>
+  <script>
+    window.addEventListener("DOMContentLoaded", function () {
+      const markdown = JSON.parse(document.getElementById("raw-markdown").textContent);
+      const target = document.getElementById("content");
+      if (!window.marked || !window.DOMPurify) { target.textContent = markdown; return; }
+      target.innerHTML = DOMPurify.sanitize(marked.parse(markdown));
+    });
+  </script>
+</body>
+</html>
