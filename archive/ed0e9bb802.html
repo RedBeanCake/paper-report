@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Dyna-2: A 1-Million-Hour Scaling Law for World-Action Models (Dyna-2：面向世界-动作模型的百万小时级缩放定律)</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/github-markdown-css/5.2.0/github-markdown.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js" defer></script>
+  <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js" defer></script>
+  <style>.markdown-body { box-sizing: border-box; max-width: 980px; margin: 0 auto; padding: 30px; } @media (max-width: 767px) { .markdown-body { padding: 15px; } }</style>
+</head>
+<body class="markdown-body">
+  <a href="../index.html">&#8592; 返回主索引</a>
+  <h1>Dyna-2: A 1-Million-Hour Scaling Law for World-Action Models (Dyna-2：面向世界-动作模型的百万小时级缩放定律)</h1>
+  <div id="content"></div>
+  <script type="application/json" id="raw-markdown">"### 1. [Dyna-2: A 1-Million-Hour Scaling Law for World-Action Models](https://www.dyna.co/dyna-2)\n- **来源链接**: `https://www.dyna.co/dyna-2`\n\n**0. 论文标题**\n- **英文标题**: Dyna-2: A 1-Million-Hour Scaling Law for World-Action Models\n- **中文标题**: Dyna-2：面向世界-动作模型的百万小时级缩放定律\n- **研究机构**: Dyna Robotics\n- **一句话总结**: 提出在超百万小时人类视频上预训练的世界-动作模型 Dyna-2，首次证明了人类数据规模到机器人零样本迁移的跨具身缩放定律，并确立视频预测为具身 AI 的新缩放轴。\n\n**1. 整体逻辑**\n- **研究任务**: 探究机器人基础模型（特别是世界-动作模型 WAM）在超大规模人类视频数据上的缩放规律，以及如何实现从人类数据到机器人数据的跨具身迁移。\n- **研究动机**: 机器人领域对如何扩展数据和模型缺乏共识，遥操作等机器人专属数据收集成本高且规模受限。从第一性原理出发，通用机器人应能执行人类正在做的任务，因此海量的人类第一人称视频是最佳预训练数据源。核心疑问在于：人类数据扩展是否产生缩放定律？该定律能否跨具身迁移到机器人？哪些建模和目标选择是必要的？\n- **本质改动**: 将预训练数据源从机器人专属数据转向百万小时级人类第一人称视频；采用世界-动作模型（WAM）架构联合预测未来视频和动作；引入视频协同训练（Video co-training）作为跨具身泛化的核心驱动力。\n- **技术溯源**: 基于视频扩散骨干网络（Video-diffusion backbone）和混合 Transformer 架构（Mixture of Transformers），采用流匹配（Flow Matching）作为训练目标，融合了世界模型（视频预测）与动作模型（动作预测）。\n\n**2. 技术拆解**\n- **核心方法**: \n  - **架构设计**: 采用混合 Transformer，视频和动作分别 token 化并拥有独立的 DiT 层。视频 token 使用因果掩码，动作 token 使用双向自注意力并交叉注意力于视频 token。动作 Transformer 设计较浅，仅在早期层与视频流结合，以大幅降低实时推理延迟。\n  - **训练范式**: 采用流匹配（Flow Matching）。在推理时，动作策略不生成或关注预测的未来视频，保持反应式（Reactive），但训练时通过共享主干网络联合拟合视频和动作的边际速度场。\n- **关键细节**: \n  - **数据构建**: 构建超 100 万小时人类第一人称操作视频语料库。通过手部姿态提取推导伪动作监督（腕部姿态和连续抓取信号），不进行特定具身的视觉或运动学对齐处理。\n  - **视频协同训练**: 发现仅用动作数据无法产生跨具身缩放定律。必须引入大量无动作标签的人类视频进行视频预测协同训练，这是实现跨具身迁移缩放的关键，视频数据本身成为新的缩放轴。\n  - **单步视频生成**: 提出一种控制论蒸馏方法，将多步扩散模型蒸馏为单步生成器。将生成视为学生与移动目标的追逐博弈，通过在线读取学生样本动态调整目标分布路径，避免单步生成导致的模糊或模式崩溃。\n- **训练/优化目标**: \n  - **联合损失函数**: $\\mathcal{L}_{\\mathrm{co}}(\\theta) = \\mathbb{E}\\left\\lVert u_\\theta^{\\mathrm{vid}}(z_t; t, c) - (z - \\varepsilon_z)\\right\\rVert^2 + \\lambda\\,\\mathbb{E}\\left\\lVert u_\\theta^{\\mathrm{act}}(a_t; t, c) - (a - \\varepsilon_a)\\right\\rVert^2$。\n  - **单步蒸馏目标**: 通过在线读取学生样本，动态调整目标分布路径，最小化平滑后的散度，确保目标分布始终在学生可跟随的范围内。\n\n**3. 实验结果**\n- **实验设置**: \n  - **预训练数据阶梯**: 1k, 10k, 100k, 1M 小时的人类视频数据（嵌套子集，保持比例一致）。\n  - **下游评估**: 1) 留出的人类数据；2) 零样本机器人数据（39 个任务，双 YAM 机械臂，无预训练机器人数据）；3) 后训练真实机器人表现（14 个任务，仅需几小时甚至 10 分钟机器人数据微调）；4) 目标函数消融（Action-only vs Joint vs +Video co-train）；5) WAM vs VLA (Dyna-1) 苹果对苹果对比。\n- **评价指标**: 动作预测的 MSE、L1、Accuracy@0.5、Accuracy@0.1；机器人任务的成功率/归一化得分；视频生成的 FVD、Motion、Flicker、推理延迟。\n- **主要结果**: \n  - **人类数据缩放定律**: 在 1k 到 1M 小时数据上，所有指标均呈现单调的幂律缩放关系（如 Held-out MSE 拟合为 $0.0691 \\cdot D^{-0.0184}$，$R^2=0.919$）。\n  - **跨具身迁移缩放定律**: 首次证明在未见过的机器人数据上，零样本预测性能随人类预训练数据规模增加而单调提升（存在 10k 到 100k 的拐点）。\n  - **后训练性能**: 跨具身缩放定律延续到真实机器人。1M 小时预训练模型在 14 个任务上表现最佳（如拧瓶盖仅需 10 分钟微调数据，成功率从 10% 提升至 50%；开保险箱任务在 1M 小时才涌现 90% 成功率）。\n  - **目标函数消融**: 视频协同训练（+Video co-train）是唯一能让跨具身泛化随数据规模提升的配方；固定动作数据时，增加纯视频数据也能单调提升机器人零样本性能。\n  - **WAM vs VLA**: 在相同条件下，早期 Dyna-2 (WAM) 的成功率是 Dyna-1 (VLA) 的 1.55 倍，质量评分 1.12 倍；在零样本客户现场部署通过率（87% vs 46%）和指令跟随能力（96% vs 35%）上显著优于 VLA。\n  - **单步视频生成**: 推理时间从 10203ms 降至 110ms（约 93 倍加速），FVD 保持在 121，Flicker 接近真实（1.94）。\n\n---\n"</script>
+  <script>
+    window.addEventListener("DOMContentLoaded", function () {
+      const markdown = JSON.parse(document.getElementById("raw-markdown").textContent);
+      const target = document.getElementById("content");
+      if (!window.marked || !window.DOMPurify) { target.textContent = markdown; return; }
+      target.innerHTML = DOMPurify.sanitize(marked.parse(markdown));
+    });
+  </script>
+</body>
+</html>
