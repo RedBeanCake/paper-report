@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Paper Report - 2608.11205 - AdvFD: Boosting Visual Generation via Adversarial Fr&#x27;echet Distance Loss (AdvFD：通过对抗 Fréchet 距离损失提升视觉生成)</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/github-markdown-css/5.2.0/github-markdown.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js" defer></script>
+  <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js" defer></script>
+  <style>.markdown-body { box-sizing: border-box; max-width: 980px; margin: 0 auto; padding: 30px; } @media (max-width: 767px) { .markdown-body { padding: 15px; } }</style>
+</head>
+<body class="markdown-body">
+  <a href="../index.html">&#8592; 返回主索引</a>
+  <h1>Paper Report - 2608.11205 - AdvFD: Boosting Visual Generation via Adversarial Fr&#x27;echet Distance Loss (AdvFD：通过对抗 Fréchet 距离损失提升视觉生成)</h1>
+  <div id="content"></div>
+  <script type="application/json" id="raw-markdown">"### 1. 🔥 [AdvFD: Boosting Visual Generation via Adversarial Fr'echet Distance Loss](https://arxiv.org/abs/2608.11205) (AdvFD：通过对抗 Fréchet 距离损失提升视觉生成)\n- **研究机构**: `原文未提及`\n- **ArXiv ID**: `2608.11205` | [点击跳转](https://arxiv.org/abs/2608.11205)\n\n**0. 论文标题**\n- **英文标题**: AdvFD: Boosting Visual Generation via Adversarial Fr'echet Distance Loss\n- **中文标题**: AdvFD：通过对抗 Fréchet 距离损失提升视觉生成\n- **研究机构**: 原文未提及\n- **一句话总结**: 提出对抗 Fréchet 距离（AdvFD），通过引入动态学习的对抗特征表示和真实特征白化机制，解决生成模型后训练中优化静态特征空间导致的“Fréchet 作弊”问题，显著提升单步生成的视觉质量与跨特征空间泛化性。\n\n**1. 整体逻辑**\n- **研究任务**: 视觉生成模型（扩散/流匹配模型）的单步生成后训练（one-step generator post-training）。\n- **研究动机**: 现有的 Fréchet 距离损失（FD-Loss）依赖静态预训练特征空间（如 Inception）进行分布匹配，会导致“Fréchet 作弊（Fréchet hacking）”——生成器过度拟合特定特征空间的统计量，导致目标指标提升，但视觉质量下降（产生伪影）且在其他未参与训练的特征空间中分布对齐恶化。原因是静态特征空间提供的视角是固定且不完整的。\n- **本质改动**: 在静态 FD 损失基础上，增加一个可学习的对抗特征表示分支，通过交替优化让对抗表示最大化真实与生成分布的 Fréchet 差异以暴露盲区，同时生成器最小化该差异；并引入真实特征白化（real-feature whitening）防止对抗表示通过特征缩放平凡地增大损失。\n- **技术溯源**: 基于 FD-Loss（利用预训练特征分布匹配进行扩散模型后训练）与 GAN 的对抗训练思想。区别于 WGAN 学习固定几何下的对偶传输势（dual transport potential），AdvFD 学习的是用于评估固定高斯传输泛函的特征几何（learned feature geometry）。\n\n**2. 技术拆解**\n- **核心方法**: \n  1. **对抗 Fréchet 距离（AdvFD）**：交替执行 G-step（冻结表示，生成器最小化静态与自适应 FD）和 D-step（冻结生成器，对抗表示最大化自适应 FD）。\n  2. **真实特征白化（Real-feature whitening）**：对对抗表示提取的真实特征进行去均值和协方差逆平方根变换，归一化尺度和几何结构，消除特征范数膨胀的捷径。\n- **关键细节**: \n  1. D-step 更新对抗表示时，采用带梯度裁剪（gradient clipping）的 AdamW 优化器，限制局部响应范围以保证稳定性。\n  2. 白化操作必须且仅应用于对抗表示分支，若应用于静态表示则无法稳定训练。\n  3. 对抗表示的初始化：使用预训练的 Inception 网络初始化效果最佳，随机初始化或 SigLIP/MAE 效果较差。\n- **训练/优化目标**: \n  1. **生成器目标**：最小化静态 Fréchet 目标与自适应 Fréchet 差异的加权和。\n  2. **对抗表示目标**：最大化经白化校准后的自适应 Fréchet 差异，以暴露静态特征空间遗漏的残差分布不匹配。\n\n**3. 实验结果**\n- **实验设置**: 在 ImageNet-1K (256×256) 上进行类别条件生成实验；使用 JiT 和 pixel MeanFlow (pMF) 作为生成器骨干，涵盖 B/L/H 三种模型规模；对比基线为原始生成器和 FD-loss。\n- **评价指标**: FID（Inception 特征空间）；FD-r6（6种特征表示的平均归一化 FD）；FD-r3（排除训练用的3种表示后，剩余3种表示的平均归一化 FD，衡量跨特征空间泛化能力）。\n- **主要结果**: \n  1. **定量提升**：AdvFD 在所有骨干和规模上均一致优于 FD-loss，且保持 1-NFE 单步生成。例如在 JiT-L 上，FID、FD-r6、FD-r3 分别相对提升 5.2%、38.0%、41.4%；在 JiT-H 上分别提升 4.0%、32.1%、34.0%。FD-r3 的显著下降证明改进泛化到了未参与训练的特征空间。\n  2. **定性改善**：生成的图像纹理更干净、对象结构更连贯，有效减少了静态 FD 优化带来的高频视觉伪影。\n  3. **消融验证**：外部引导（如 PatchGAN、DMD）无法稳定提升跨特征对齐；去除白化会导致特征范数爆炸和训练崩溃；对抗表示必须可学习且使用预训练 Inception 初始化才能取得最佳效果。\n\n---\n"</script>
+  <script>
+    window.addEventListener("DOMContentLoaded", function () {
+      const markdown = JSON.parse(document.getElementById("raw-markdown").textContent);
+      const target = document.getElementById("content");
+      if (!window.marked || !window.DOMPurify) { target.textContent = markdown; return; }
+      target.innerHTML = DOMPurify.sanitize(marked.parse(markdown));
+    });
+  </script>
+</body>
+</html>
