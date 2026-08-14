@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Paper Report - 2608.06729 - AtlasVLA: Persistent World-Ego State Modeling for Vision-Language-Action Models (AtlasVLA：用于视觉-语言-动作模型的持久世界-自我状态建模)</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/github-markdown-css/5.2.0/github-markdown.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js" defer></script>
+  <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js" defer></script>
+  <style>.markdown-body { box-sizing: border-box; max-width: 980px; margin: 0 auto; padding: 30px; } @media (max-width: 767px) { .markdown-body { padding: 15px; } }</style>
+</head>
+<body class="markdown-body">
+  <a href="../index.html">&#8592; 返回主索引</a>
+  <h1>Paper Report - 2608.06729 - AtlasVLA: Persistent World-Ego State Modeling for Vision-Language-Action Models (AtlasVLA：用于视觉-语言-动作模型的持久世界-自我状态建模)</h1>
+  <div id="content"></div>
+  <script type="application/json" id="raw-markdown">"### 1. 🔥 [AtlasVLA: Persistent World-Ego State Modeling for Vision-Language-Action Models](https://arxiv.org/abs/2608.06729) (AtlasVLA：用于视觉-语言-动作模型的持久世界-自我状态建模)\n- **研究机构**: `原文未提及`\n- **ArXiv ID**: `2608.06729` | [点击跳转](https://arxiv.org/abs/2608.06729)\n\n**0. 论文标题**\n- **英文标题**: AtlasVLA: Persistent World-Ego State Modeling for Vision-Language-Action Models\n- **中文标题**: AtlasVLA：用于视觉-语言-动作模型的持久世界-自我状态建模\n- **研究机构**: 原文未提及\n- **一句话总结**: 提出AtlasVLA框架，通过构建4D持久世界状态记忆和自我工作状态记忆的双记忆架构，使VLA模型在仅使用单目腕部相机的严苛条件下，克服感知遗忘和任务进度遗忘，实现长视野任务的主动推理与SOTA性能。\n\n**1. 整体逻辑**\n- **研究任务**: 解决视觉-语言-动作（VLA）模型在部分可观测和长视野（long-horizon）机器人操作任务中的性能瓶颈，特别是在仅依赖单目腕部相机（wrist-only camera）的严苛设定下。\n- **研究动机**: 现有VLA模型本质上是“反应式”的，直接将即时观测映射为动作。在单腕部相机设定下暴露出两大致命缺陷：1）感知遗忘（Perception Forgetting）：物体移出视野即被遗忘，缺乏全局空间认知；2）任务进度遗忘（Task-progress Forgetting）：在多步长视野执行中缺乏历史上下文，容易迷失当前任务进度。\n- **本质改动**: 将VLA模型从“无记忆的反应式观测-动作”范式，转变为“基于持久世界-自我状态的主动推理”范式。引入双记忆架构（4D持久世界状态记忆 + 自我工作状态记忆），并将这两个状态作为条件输入到扩散Transformer（DiT）中以生成动作。\n- **技术溯源**: 结合了3D空间重建（类似TSDF的体素哈希融合）、流式深度估计（Depth Anything v3）、基于Transformer的交叉注意力记忆检索机制，以及条件化扩散模型（DiT）进行连续动作生成。\n\n**2. 技术拆解**\n- **核心方法**: \n  1. **4D持久世界状态记忆 (Persistent World State Memory)**：利用深度估计和相机内外参，将2D视觉token反投影到3D空间，并注入时空位置编码形成4D表示。通过体素哈希策略和滑动窗口进行全局空间融合与更新，首帧永久锚定，解决视觉盲区。\n  2. **自我工作状态记忆 (Ego-Working State Memory)**：使用可学习的意图查询（intent-aware queries）通过交叉注意力聚合目标导向信息，并通过冗余感知合并（redundancy-aware consolidation）机制更新记忆库，隐式跟踪历史自我状态和任务进度，防止意图漂移。\n  3. **世界-自我引导的动作生成 (World-Ego-Guided Action Generation)**：从双记忆库中检索上下文，采用解耦的逐步条件化扩散Transformer（DiT）。在扩散的每一步，动作token先通过自我工作注意力层捕获任务进度，再通过世界状态注意力层获取几何空间 grounding，最终解码出动作。\n- **关键细节**: \n  - 深度估计采用流式模型（Depth Anything v3）以保证时序一致性；世界状态更新时，高置信度深度的观测权重更大。\n  - 大语言模型（7B LLaMA-2）不直接解码动作，而是作为高级意图跟踪器，输出紧凑的自我工作潜在状态；动作专家（DiT，约300M参数）负责生成连续控制指令。\n  - 推理时使用DDIM调度器（10步去噪），并应用无分类器引导（CFG，scale=1.5）。\n- **训练/优化目标**: 将连续动作合成建模为去噪过程。优化目标是训练DiT网络从加入高斯噪声的动作chunk中预测注入的噪声（MSE Loss）。训练时采用条件 dropout 策略（10%概率替换为null token）以支持推理时的CFG。\n\n**3. 实验结果**\n- **实验设置**: \n  - 硬件/平台：8张NVIDIA A100 GPU训练；真实世界使用Franka 7-DoF机械臂，仅配备腕部相机。\n  - 数据集：LIBERO（5个套件）、RLBench（6个代表性任务）、真实世界（6个通用任务 + 4个长视野任务）。\n  - 约束条件：所有实验严格限制为**仅使用腕部相机（wrist-only）**，禁用任何第三人称视角。\n- **评价指标**: 任务成功率（Success Rate, %），每个任务进行50次（LIBERO/真实世界）或20次（RLBench）独立rollout评估。同时评估了推理延迟、吞吐量和显存占用。\n- **主要结果**: \n  - **LIBERO**：腕部相机下平均成功率达 97.6%；在极具挑战的 LIBERO-Long 上达到 94.6%，比强基线 MemoryVLA 高出 7.0%（绝对提升），超越了使用多视角的基线。\n  - **RLBench**：腕部相机下平均成功率达 70.8%，比 MemoryVLA 腕部设定高出 15.8%。\n  - **真实世界**：通用任务平均成功率 78.7%（比 MemoryVLA 腕部高 16.4%）；长视野任务平均成功率 69.5%，比 $\\pi_0$ 绝对提升 17.5%，比 MemoryVLA 提升 9.0%。\n  - **运行效率**：推理延迟仅增加 0.012s（达 0.158s），吞吐量 101.3 Hz，显存占用 18.1 GB，满足实时闭环控制需求。\n  - **消融实验**：证明了移除世界状态记忆会导致真实世界长视野成功率暴跌 15.5%（69.5%降至54.0%），移除自我工作记忆下降 13.0%，证实了双记忆架构的不可或缺性。\n\n---\n"</script>
+  <script>
+    window.addEventListener("DOMContentLoaded", function () {
+      const markdown = JSON.parse(document.getElementById("raw-markdown").textContent);
+      const target = document.getElementById("content");
+      if (!window.marked || !window.DOMPurify) { target.textContent = markdown; return; }
+      target.innerHTML = DOMPurify.sanitize(marked.parse(markdown));
+    });
+  </script>
+</body>
+</html>
